@@ -1,0 +1,130 @@
+{
+  "name": "NEXUS Analysis Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analysis_pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "analysis-pipeline"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst departments = body.departments || ['ceo','cto','cpo','product','rnd','design','security','legal','marketing','finance'];\nconst ideaPrompt = body.ideaPrompt || '';\nconst researchSources = body.researchSources || '';\nconst codebaseContext = body.codebaseContext || '';\n\n// Create one item per department\nconst items = departments.map(dept => ({\n  json: {\n    department: dept,\n    ideaPrompt,\n    researchSources,\n    codebaseContext,\n    briefId: body.briefId\n  }\n}));\n\nreturn items;"
+      },
+      "id": "split-departments",
+      "name": "Split by Department",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dept = $json.department;\nconst DEPT_PROMPTS = {\n  ceo: 'You are a CEO analyzing business feasibility. Sections: Business Feasibility, Market Opportunity, Competitor Analysis, Business Risks, CEO Decision (GO/NO-GO with rationale).',\n  cto: 'You are a CTO evaluating technical architecture. Sections: Technical Feasibility, Proposed Architecture (include Mermaid diagram), Tech Stack, Integration Complexity, Technical Debt, Timeline.',\n  cpo: 'You are a CPO defining product strategy. Sections: User Profile, USP, UX Patterns, MoSCoW Prioritization, KPIs.',\n  product: 'You are a Product Manager planning features. Sections: User Stories (Gherkin format), Sprint Planning, Backlog Items, Dependencies.',\n  rnd: 'You are an R&D lead researching implementation. Sections: Recommended Libraries (with trust scores), Implementation Approaches, POC Proposal, Code Samples, Dependencies.',\n  design: 'You are a Design Lead. Sections: Design System Impact, Component Library, User Flows, Accessibility (WCAG), RTL Support.',\n  security: 'You are a Security Analyst. Sections: Threat Model (STRIDE), OWASP Top 10, Data Classification, Auth/Authz, API Security, HIPAA/GDPR.',\n  legal: 'You are a Legal Advisor. Sections: Open Source Licenses, GDPR/HIPAA, ToS Impact, Privacy Policy, IP Protection, Risk Matrix.',\n  marketing: 'You are a Marketing Strategist. Sections: GTM Strategy, ICP, Competitive Positioning, Content Strategy, SEO Keywords, Launch Timeline.',\n  finance: 'You are a CFO. Sections: ROI Analysis, Cost-Benefit, Unit Economics, Budget Estimate, Stage-Gate Approval, Break-even Timeline.'\n};\n\nconst systemPrompt = (DEPT_PROMPTS[dept] || 'Analyze from your department perspective.') + ' Write ALL output in HEBREW. Be thorough and specific.';\nconst userPrompt = `Idea: ${$json.ideaPrompt}\\n\\nCodebase Context:\\n${($json.codebaseContext || '').slice(0, 5000)}\\n\\nResearch Sources:\\n${($json.researchSources || '').slice(0, 5000)}`;\n\nreturn [{ json: { ...($json), systemPrompt, userPrompt } }];"
+      },
+      "id": "build-dept-prompt",
+      "name": "Build Dept Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "key", "value": "={{ $env.GOOGLE_GENERATIVE_AI_API_KEY }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.systemPrompt + '\\n\\n' + $json.userPrompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 4000 } }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "ai-analyze",
+      "name": "AI Department Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const content = item.json.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  const dept = $('Build Dept Prompt').item.json.department;\n  const briefId = $('Build Dept Prompt').item.json.briefId;\n  \n  // Quality gate: check minimum output length\n  const quality = content.length > 200 ? 'good' : 'insufficient';\n  \n  results.push({\n    json: {\n      department: dept,\n      briefId,\n      output: content,\n      quality,\n      outputLength: content.length,\n      modelUsed: 'gemini-2.5-flash'\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "parse-analysis",
+      "name": "Parse & Quality Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://host.docker.internal:3001/api/admin/nexus/briefs/' + $json.briefId + '/n8n-callback' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ briefId: $json.briefId, workflowType: 'analysis', department: $json.department, output: $json.output, modelUsed: $json.modelUsed, quality: $json.quality }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "callback-memoraid",
+      "name": "Send to MEMORAID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, departments: $input.all().length }) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1750, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[ { "node": "Split by Department", "type": "main", "index": 0 } ]]
+    },
+    "Split by Department": {
+      "main": [[ { "node": "Build Dept Prompt", "type": "main", "index": 0 } ]]
+    },
+    "Build Dept Prompt": {
+      "main": [[ { "node": "AI Department Analysis", "type": "main", "index": 0 } ]]
+    },
+    "AI Department Analysis": {
+      "main": [[ { "node": "Parse & Quality Check", "type": "main", "index": 0 } ]]
+    },
+    "Parse & Quality Check": {
+      "main": [[ { "node": "Send to MEMORAID", "type": "main", "index": 0 } ]]
+    },
+    "Send to MEMORAID": {
+      "main": [[ { "node": "Respond", "type": "main", "index": 0 } ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "NEXUS" }]
+}

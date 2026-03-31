@@ -1,5 +1,6 @@
-import { FormEvent, useState } from 'react';
-import { useLocation } from 'wouter';
+import { FormEvent, useEffect, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
+import { useLocation, Link } from 'wouter';
 import { useAuth } from '../hooks/useAuth';
 
 export default function LoginPage() {
@@ -14,6 +15,29 @@ export default function LoginPage() {
   const [familyName, setFamilyName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [redirectError, setRedirectError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlMode = params.get('mode');
+    const urlCode = params.get('code');
+    const urlError = params.get('error');
+    if (urlMode === 'register') {
+      setMode('register');
+      setRegisterMode('join');
+      if (urlCode) setInviteCode(urlCode);
+    }
+    if (urlError === 'user_not_found') setRedirectError('חשבון לא נמצא. נסה להירשם תחילה.');
+    else if (urlError === 'oauth_failed') setRedirectError('שגיאה בהתחברות עם Google. נסה שוב.');
+    else if (urlError === 'invalid_invite') setRedirectError('קוד משפחה לא תקף.');
+    else if (urlError === 'google_not_configured') setRedirectError('התחברות עם Google אינה מוגדרת.');
+    if (urlError) {
+      params.delete('error');
+      const qs = params.toString();
+      window.history.replaceState(null, '', qs ? `/login?${qs}` : '/login');
+    }
+  }, []);
 
   const isLogin = mode === 'login';
   const isCreateFamily = registerMode === 'create';
@@ -42,7 +66,14 @@ export default function LoginPage() {
           });
         }
       }
-      navigate('/dashboard');
+      const params = new URLSearchParams(window.location.search);
+      if (!isLogin && isCreateFamily) {
+        // New family registration → onboarding wizard
+        navigate('/onboarding');
+      } else {
+        const redirect = params.get('redirect') || '/dashboard';
+        navigate(redirect.startsWith('/') ? redirect : '/dashboard');
+      }
     } catch {
       // השגיאה כבר נשמרת ב-hook
     }
@@ -55,7 +86,7 @@ export default function LoginPage() {
     >
       <div className="w-full max-w-md rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-sm">
         <h1 className="text-xl font-semibold mb-1 text-[hsl(var(--foreground))] text-center">
-          הרשמה ל‑MemorAid
+          הרשמה ל‑MemorAId
         </h1>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mb-6 text-center">
           כניסה או הרשמה להתחלת ניהול הטיפול המשפחתי.
@@ -91,26 +122,21 @@ export default function LoginPage() {
             {isLogin ? 'או התחברות מהירה:' : 'או הרשמה מהירה עם החשבון הקיים:'}
           </p>
             <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  alert('כניסה/הרשמה עם Google תתווסף בשלב הבא (OAuth). כרגע התחבר/י עם אימייל וסיסמה.')
-                }
-                className="w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--background))]"
+              <a
+                href={`/api/auth/google?mode=${isLogin ? 'login' : 'register'}${!isLogin && !isCreateFamily && inviteCode ? `&inviteCode=${encodeURIComponent(inviteCode)}` : ''}`}
+                className="w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--background))] flex items-center justify-center gap-2"
                 data-testid="button-login-google"
               >
-                <span className="flex items-center justify-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-sm bg-white shadow-sm">
-                    <span className="text-[11px] font-bold text-[#4285F4]">G</span>
-                  </span>
-                  <span>{isLogin ? 'כניסה מהירה עם Gmail' : 'הרשמה/כניסה עם Gmail'}</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-sm bg-white shadow-sm">
+                  <span className="text-[11px] font-bold text-[#4285F4]">G</span>
                 </span>
-              </button>
+                <span>{isLogin ? 'כניסה מהירה עם Gmail' : 'הרשמה/כניסה עם Gmail'}</span>
+              </a>
               <button
                 type="button"
                 onClick={() =>
                   alert(
-                    'כניסה/הרשמה עם Outlook / Microsoft תתווסף בשלב הבא. כרגע התחבר/י עם אימייל וסיסמה.'
+                    'כניסה/הרשמה עם Outlook תתווסף בשלב הבא. כרגע התחבר/י עם Gmail או אימייל וסיסמה.'
                   )
                 }
                 className="w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--background))]"
@@ -232,14 +258,24 @@ export default function LoginPage() {
             <label className="block text-sm font-medium mb-1 text-[hsl(var(--foreground))]">
               סיסמה
             </label>
-            <input
-              type="password"
-              className="w-full rounded-md border border-[hsl(var(--border))] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))] focus:border-[hsl(var(--primary))]"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="לפחות 8 תווים, אות גדולה ומספר"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="w-full rounded-md border border-[hsl(var(--border))] px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))] focus:border-[hsl(var(--primary))]"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="לפחות 8 תווים, אות גדולה ומספר"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute inset-y-0 left-2 flex items-center text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                aria-label={showPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           {isLogin && (
@@ -252,22 +288,18 @@ export default function LoginPage() {
                 />
                 זכור אותי ל־30 יום
               </label>
-              <button
-                type="button"
+              <Link
+                href="/forgot-password"
                 className="text-[10px] font-semibold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] underline-offset-2 hover:underline"
-                onClick={() =>
-                  alert(
-                    'בגרסת ה‑MVP שינוי/איפוס סיסמה נעשה דרך תמיכה. בגרסה הבאה נוסיף מסך איפוס סיסמה מלא.'
-                  )
-                }
-                data-testid="button-password-options"
               >
-                שכחת סיסמה / שינוי סיסמה
-              </button>
+                שכחת סיסמה?
+              </Link>
             </div>
           )}
 
-          {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+          {(error || redirectError) && (
+            <p className="text-xs text-red-600 mt-1">{redirectError || error}</p>
+          )}
 
           <button
             type="submit"

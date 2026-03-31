@@ -8,6 +8,7 @@ import { HowItWorksSection } from './components/landing/HowItWorksSection';
 import { BenefitsSection } from './components/landing/BenefitsSection';
 import { ValuePropsSection } from './components/landing/ValuePropsSection';
 import { OurStorySection } from './components/landing/OurStorySection';
+import { CareJourneySection } from './components/landing/CareJourneySection';
 
 export default function LandingPage() {
   const [, navigate] = useLocation();
@@ -87,7 +88,10 @@ export default function LandingPage() {
           </p>
         </div>
       </section>
-      {/* Before / After – ההבדל ברור (סקשן 3) */}
+      {/* Care Journey – 4 שלבים (סקשן 3) */}
+      <CareJourneySection />
+
+      {/* Before / After – ההבדל ברור (סקשן 4) */}
       <BeforeAfterSection />
 
       {/* Fit Quiz – האם MEMORAID מתאימה לכם? (סקשן 4) */}

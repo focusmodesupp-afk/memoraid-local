@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MemorAid</title>
+    <title>MemorAId</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function(){if(!/\/admin/.test(location.pathname))return;var t=localStorage.getItem('memoraid_admin_theme')||'dark';document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.setAttribute('data-admin-theme',t);document.body.setAttribute('data-admin-theme',t);})();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

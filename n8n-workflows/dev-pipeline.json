@@ -1,0 +1,71 @@
+{
+  "name": "NEXUS Development Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dev_pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "dev-pipeline"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://host.docker.internal:3001/api/admin/nexus/dev-tasks/' + $json.body.taskId + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Cookie", "value": "={{ $json.body.authCookie || '' }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "load-context",
+      "name": "Load Task Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst task = ctx.task || {};\nconst nexus = ctx.nexusContext || {};\nconst deptAnalysis = ctx.departmentAnalysis || '';\nconst webSources = (ctx.webSources || []).slice(0, 15);\nconst docs = ctx.generatedDocs || [];\n\n// Build comprehensive development prompt\nlet prompt = `# משימת פיתוח: ${task.title}\\n\\n`;\nprompt += `## תיאור המשימה\\n${task.description || 'אין תיאור'}\\n\\n`;\n\nif (nexus.sourceDepartment) {\n  prompt += `## מחלקה מקורית: ${nexus.sourceDepartment}\\n\\n`;\n}\n\nif (deptAnalysis) {\n  prompt += `## ניתוח מחלקה מלא\\n${deptAnalysis.slice(0, 3000)}\\n\\n`;\n}\n\nif (webSources.length > 0) {\n  prompt += `## מקורות מחקר (${webSources.length})\\n`;\n  for (const s of webSources) {\n    prompt += `- [${s.source_type}] ${s.title} (trust: ${s.trust_score}) ${s.url}\\n`;\n    if (s.snippet) prompt += `  ${s.snippet.slice(0, 150)}\\n`;\n  }\n  prompt += '\\n';\n}\n\nif (docs.length > 0) {\n  prompt += `## מסמכי מפרט\\n`;\n  for (const d of docs) {\n    prompt += `### ${d.title} (${d.docType})\\n${(d.content || '').slice(0, 2000)}\\n\\n`;\n  }\n}\n\nprompt += `\\n---\\n## הנחיות לפיתוח\\n`;\nprompt += `1. קרא את כל ההקשר למעלה לפני שאתה מתחיל\\n`;\nprompt += `2. בדוק את הקבצים הרלוונטיים שמוזכרים בתיאור המשימה\\n`;\nprompt += `3. כתוב את הקוד לפי ה-Acceptance Criteria\\n`;\nprompt += `4. הרץ בדיקות ווודא שהכל עובד\\n`;\n\nreturn [{ json: { taskId: $('Webhook Trigger').item.json.body.taskId, prompt, task, nexusContext: nexus, sourceCount: webSources.length, docCount: docs.length } }];"
+      },
+      "id": "build-prompt",
+      "name": "Build Dev Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, taskId: $json.taskId, prompt: $json.prompt, sourceCount: $json.sourceCount, docCount: $json.docCount }) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond with Prompt",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1000, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[ { "node": "Load Task Context", "type": "main", "index": 0 } ]]
+    },
+    "Load Task Context": {
+      "main": [[ { "node": "Build Dev Prompt", "type": "main", "index": 0 } ]]
+    },
+    "Build Dev Prompt": {
+      "main": [[ { "node": "Respond with Prompt", "type": "main", "index": 0 } ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "NEXUS" }]
+}

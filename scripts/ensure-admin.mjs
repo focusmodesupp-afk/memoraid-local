@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+/**
+ * יוצר אדמין או מעדכן סיסמה - פותר Invalid credentials
+ * Usage: node scripts/ensure-admin.mjs
+ * Or: ADMIN_EMAIL=x ADMIN_PASSWORD=y node scripts/ensure-admin.mjs
+ */
+import 'dotenv/config';
+
+import pg from 'pg';
+import bcrypt from 'bcryptjs';
+
+const { Pool } = pg;
+const url = process.env.DATABASE_URL;
+if (!url) {
+  console.error('DATABASE_URL required in .env');
+  process.exit(1);
+}
+
+const useSsl = !url.includes('localhost') && !url.includes('127.0.0.1');
+const pool = new Pool({
+  connectionString: url,
+  ssl: useSsl ? { rejectUnauthorized: true } : false,
+});
+
+const email = process.env.ADMIN_EMAIL;
+const password = process.env.ADMIN_PASSWORD;
+if (!email || !password) {
+  console.error('❌ ADMIN_EMAIL and ADMIN_PASSWORD must be set in environment variables.');
+  console.error('   Example: ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=... node scripts/ensure-admin.mjs');
+  process.exit(1);
+}
+
+async function run() {
+  const client = await pool.connect();
+  try {
+    // Create tables if missing
+    await client.query({
+      text: `
+        CREATE TABLE IF NOT EXISTS admin_users (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          email varchar(255) NOT NULL UNIQUE,
+          password_hash text NOT NULL,
+          full_name varchar(255),
+          role varchar(32) DEFAULT 'super_admin' NOT NULL,
+          is_active boolean DEFAULT true NOT NULL,
+          last_login_at timestamptz,
+          created_at timestamptz DEFAULT now() NOT NULL
+        )
+      `,
+      prepare: false,
+    });
+    await client.query({
+      text: `
+        CREATE TABLE IF NOT EXISTS admin_sessions (
+          id varchar(255) PRIMARY KEY,
+          admin_user_id uuid NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+          expires_at timestamptz NOT NULL,
+          created_at timestamptz DEFAULT now() NOT NULL
+        )
+      `,
+      prepare: false,
+    });
+
+    const hash = await bcrypt.hash(password, 10);
+    await client.query({
+      text: `
+        INSERT INTO admin_users (email, password_hash, full_name, role)
+        VALUES ($1, $2, $3, 'super_admin')
+        ON CONFLICT (email) DO UPDATE SET password_hash = $2, is_active = true
+      `,
+      values: [email, hash, email.split('@')[0]],
+      prepare: false,
+    });
+
+    console.log('✅ אדמין מוכן!');
+    console.log('   Email:', email);
+    console.log('   Password:', password);
+    console.log('\n🌐 התחברות: http://localhost:5173/admin/login\n');
+  } catch (err) {
+    console.error('❌ שגיאה:', err.message);
+    if (err.code === '42P01') console.log('   הרץ: node scripts/create-admin.mjs');
+    process.exit(1);
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+run();

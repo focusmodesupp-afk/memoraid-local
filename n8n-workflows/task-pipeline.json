@@ -1,0 +1,93 @@
+{
+  "name": "NEXUS Task Extraction Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "task_pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "task-pipeline"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst briefId = body.briefId;\nconst assembledBrief = body.assembledBrief || '';\nconst ideaPrompt = body.ideaPrompt || '';\nconst webSources = body.webSources || [];\n\n// Build extraction prompt with full context\nlet context = `Idea: ${ideaPrompt}\\n\\nResearch Brief (excerpt):\\n${assembledBrief.slice(0, 30000)}`;\n\nif (webSources.length > 0) {\n  context += '\\n\\n## Web Sources:\\n';\n  for (const s of webSources.slice(0, 20)) {\n    context += `- [${s.sourceType || s.source_type}] ${s.title} (trust: ${s.trustScore || s.trust_score}) ${s.url}\\n`;\n  }\n}\n\nreturn [{ json: { briefId, context, ideaPrompt } }];"
+      },
+      "id": "prepare-context",
+      "name": "Prepare Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "key", "value": "={{ $env.GOOGLE_GENERATIVE_AI_API_KEY }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'You are a senior engineering manager. Extract 25-50 development tasks from this research brief. Output ONLY a JSON array. Each task: { title (Hebrew), description (Hebrew markdown with sections: מה לעשות, קבצים לגעת, API, DB, Acceptance Criteria, מקורות, תלויות), priority (urgent/high/medium/low), estimateHours (1-40), category (feature/bug/refactor/infrastructure/design/documentation/security/research), skillTags (English array from: react, nodejs, postgresql, ai-integration, security-review, legal-review, design-system, devops, api-design, mobile, testing), sourceDepartment (English: ceo/cto/cpo/product/rnd/design/security/legal/marketing/finance) }.\\n\\n' + $json.context }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 16000 } }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "ai-extract",
+      "name": "AI Extract Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet tasks = [];\nfor (const item of items) {\n  const content = item.json.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  try {\n    const jsonMatch = content.match(/\\[[\\s\\S]*\\]/);\n    if (jsonMatch) {\n      let raw = jsonMatch[0];\n      // Sanitize JSON\n      raw = raw.replace(/\"((?:[^\"\\\\]|\\\\.)*)\">/g, (_m, inner) =>\n        '\"' + inner.replace(/\\n/g, '\\\\n').replace(/\\r/g, '').replace(/\\t/g, '\\\\t') + '\"'\n      );\n      raw = raw.replace(/,\\s*([\\]\\}])/g, '$1');\n      tasks = JSON.parse(raw);\n    }\n  } catch (e) {\n    // Try object-by-object extraction\n    const matches = content.match(/\\{[^{}]*\"title\"\\s*:\\s*\"[^\"]+[^{}]*\\}/g) || [];\n    for (const m of matches) {\n      try {\n        const sanitized = m.replace(/\"((?:[^\"\\\\]|\\\\.)*)\">/g, (_m, inner) =>\n          '\"' + inner.replace(/\\n/g, '\\\\n').replace(/\\r/g, '') + '\"'\n        );\n        const obj = JSON.parse(sanitized);\n        if (obj.title) tasks.push(obj);\n      } catch {}\n    }\n  }\n}\n\ntasks = tasks.filter(t => t && t.title && t.title.length > 3);\n\nreturn [{ json: { tasks, count: tasks.length, briefId: $('Webhook Trigger').item.json.body.briefId } }];"
+      },
+      "id": "parse-tasks",
+      "name": "Parse Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, tasks: $json.tasks, count: $json.count }) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond with Tasks",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[ { "node": "Prepare Context", "type": "main", "index": 0 } ]]
+    },
+    "Prepare Context": {
+      "main": [[ { "node": "AI Extract Tasks", "type": "main", "index": 0 } ]]
+    },
+    "AI Extract Tasks": {
+      "main": [[ { "node": "Parse Tasks", "type": "main", "index": 0 } ]]
+    },
+    "Parse Tasks": {
+      "main": [[ { "node": "Respond with Tasks", "type": "main", "index": 0 } ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "NEXUS" }]
+}

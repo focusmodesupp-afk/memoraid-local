@@ -23,6 +23,9 @@ export default defineConfig({
       '/api': {
         target: `http://localhost:${process.env.API_PORT ?? 3001}`,
         changeOrigin: true,
+        secure: false,
+        timeout: 300000,    // 5 min — needed for long AI calls (task extraction, research)
+        proxyTimeout: 300000,
       },
     },
   },

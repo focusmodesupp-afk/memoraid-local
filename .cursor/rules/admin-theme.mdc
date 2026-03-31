@@ -1,0 +1,32 @@
+---
+description: חוקיות Theme בממשק Admin – Dark/Light Mode
+globs: client/src/admin/**/*.tsx, client/src/admin/**/*.ts, client/src/admin/**/*.css
+alwaysApply: false
+---
+
+# Admin Theme Rules
+
+בכל פיתוח חדש בממשק Admin – **חובה** להתבסס על `client/src/admin/ADMIN_THEME_RULES.md`.
+
+## כללים מהירים
+
+1. **Base = Dark** – קומפוננטות נכתבות עם מחלקות Dark (slate-800, text-slate-100 וכו'). Light מקבל override אוטומטי.
+
+2. **מחלקות חובה:**
+   - כרטיסים: `admin-card` או `bg-slate-800/50`
+   - שדות: `admin-input`
+   - טקסט ראשי: `text-slate-100`
+   - טקסט משני: `admin-muted` או `text-slate-400`
+
+3. **איסורים:**
+   - לא להשתמש ב-`dark:` – Light מוגדר כ-override ב-CSS.
+   - לא לשנות ערכי Dark – רק להוסיף overrides ל-Light ב-`admin-theme.css`.
+
+4. **צבעים חדשים** – אם צריך צבע שלא קיים: להוסיף override ל-Light ב-`admin-theme.css` עם סלקטור `[data-admin-theme="light"]`.
+
+5. **רוחב בלוקים** – בלוקים עם מעט תוכן (כמו התקדמות משימות, מעקב שעות) לא יתמתחו לרוחב מלא. להשתמש ב-`max-w-md` או `max-w-xl` ו/או `compact` ב-DataBlock. הפריסה תקבע את הרוחב לפי התוכן.
+
+## מקור אמת
+
+- `client/src/admin/ADMIN_THEME_RULES.md` – פלטת צבעים, משתנים, איסורים
+- `client/src/admin/admin-theme.css` – כל ה-overrides ל-Light Mode

@@ -17,9 +17,18 @@ if (!url) {
   process.exit(1);
 }
 
-const child = spawn(
-  'npx',
-  ['drizzle-kit', 'push:pg', '--driver', 'pg', '--schema', './shared/schemas/schema.ts', '--connectionString', url],
-  { stdio: 'inherit', cwd: process.cwd() }
-);
+const isWin = process.platform === 'win32';
+const cwd = process.cwd();
+
+// drizzle-kit 0.21+ uses config file (drizzle.config.ts) – just run 'push'
+const npxArgs = ['drizzle-kit', 'push'];
+
+const child = isWin
+  ? spawn('cmd', ['/c', 'npx', ...npxArgs], { stdio: 'inherit', cwd, env: { ...process.env, DATABASE_URL: url } })
+  : spawn('npx', npxArgs, { stdio: 'inherit', cwd, env: { ...process.env, DATABASE_URL: url } });
+
 child.on('exit', (code) => process.exit(code ?? 0));
+child.on('error', (err) => {
+  console.error('spawn error:', err);
+  process.exit(1);
+});

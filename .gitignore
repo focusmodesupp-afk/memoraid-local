@@ -6,6 +6,9 @@
 # Dependencies
 node_modules/
 
+# Uploads (dev local storage)
+uploads/
+
 # Build
 dist/
 *.tsbuildinfo

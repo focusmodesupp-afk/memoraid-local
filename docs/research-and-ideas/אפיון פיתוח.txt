@@ -1,0 +1,246 @@
+Context
+הצוות בנה מערכת אדמין ל-MemorAId עם תשתית AI קיימת (ניתוח פרויקט, תכנון פיצ'רים, שאלות ל-AI, לוח מחוונים Intelligence Hub). כעת רוצים להוסיף "מוח" מאחורי האדמין — מערכת Nexus Brief שבה:
+
+מעלים רעיון/פרומפט
+המערכת אוספת אינטליגנציה מהרשת (GitHub, Reddit, RSS, Perplexity)
+כל מחלקה בחברה (CEO, CTO, CPO, R&D, Design, Product, Security, Legal, Marketing) מבצעת מחקר עצמאי עם AI
+התוצאות מתאגדות לניירת (Brief) מובנית לסקירה → אישור / עריכה / דחייה
+לאחר אישור: יצירת משימות פיתוח אוטומטית
+
+אין שינויים בצד המשתמש. הכל נמצא בתוך האדמין הקיים.
+
+Critical Files
+לשינוי:
+
+shared/schemas/schema.ts — הוספת 2 enums + 3 טבלאות + relations
+server/src/index.ts — mount של nexusAdminRoutes (2 שורות)
+client/src/admin/adminNavConfig.ts — הוספת section "Nexus"
+client/src/admin/AdminShell.tsx — הוספת 2 imports + 2 routes
+
+ליצירה:
+
+server/src/nexusWebIntelligence.ts — איסוף נתונים מ-GitHub/Reddit/RSS/Perplexity
+server/src/nexusDepartmentAgents.ts — סוכני מחלקות + system prompts
+server/src/nexusBriefOrchestrator.ts — פייפליין SSE + assembly
+server/src/nexusAdminRoutes.ts — router Express
+client/src/admin/pages/AdminNexusHub.tsx — רשימת ניירות
+client/src/admin/pages/AdminNexusBrief.tsx — אשף יצירה + סטרימינג + סקירה
+
+
+Phase 1 — Database (schema.ts)
+הוסף לסוף shared/schemas/schema.ts:
+typescriptexport const nexusBriefStatusEnum = pgEnum('nexus_brief_status', [
+  'draft', 'researching', 'review', 'approved', 'rejected', 'in_progress', 'done',
+]);
+
+export const nexusDepartmentEnum = pgEnum('nexus_department', [
+  'ceo', 'cto', 'cpo', 'rd', 'design', 'product', 'security', 'legal', 'marketing',
+]);
+
+export const nexusBriefs = pgTable('nexus_briefs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  title: varchar('title', { length: 500 }).notNull(),
+  ideaPrompt: text('idea_prompt').notNull(),
+  status: nexusBriefStatusEnum('status').notNull().default('draft'),
+  selectedDepartments: nexusDepartmentEnum('selected_departments').array().notNull().default([]),
+  selectedModels: varchar('selected_models', { length: 32 }).array().notNull().default([]),
+  assembledBrief: text('assembled_brief'),
+  reviewNotes: text('review_notes'),
+  codebaseDepth: varchar('codebase_depth', { length: 16 }).default('deep'),
+  codebaseScope: varchar('codebase_scope', { length: 16 }).default('all'),
+  totalCostUsd: varchar('total_cost_usd', { length: 24 }).default('0'),
+  totalTokensUsed: integer('total_tokens_used').default(0),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  adminFullName: varchar('admin_full_name', { length: 255 }),
+  researchStartedAt: timestamp('research_started_at', { withTimezone: true }),
+  researchCompletedAt: timestamp('research_completed_at', { withTimezone: true }),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  approvedBy: uuid('approved_by').references(() => adminUsers.id, { onDelete: 'set null' }),
+  generatedSprintId: uuid('generated_sprint_id').references(() => sprints.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const nexusBriefDepartments = pgTable('nexus_brief_departments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id').notNull().references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  department: nexusDepartmentEnum('department').notNull(),
+  status: varchar('status', { length: 32 }).notNull().default('pending'),
+  output: text('output'),
+  modelUsed: varchar('model_used', { length: 64 }),
+  tokensUsed: integer('tokens_used').default(0),
+  costUsd: varchar('cost_usd', { length: 24 }).default('0'),
+  errorMessage: text('error_message'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const nexusBriefWebSources = pgTable('nexus_brief_web_sources', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id').notNull().references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  sourceType: varchar('source_type', { length: 32 }).notNull(),
+  url: text('url'),
+  title: varchar('title', { length: 500 }),
+  snippet: text('snippet'),
+  trustScore: integer('trust_score').default(0),
+  githubStars: integer('github_stars'),
+  redditScore: integer('reddit_score'),
+  contributorCount: integer('contributor_count'),
+  rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+לאחר הוספה: `npm run db:push`
+
+---
+
+## Phase 2 — Server Core
+
+### nexusWebIntelligence.ts
+אוסף מקורות מ-4 מקורות:
+
+| מקור | API | Auth |
+|------|-----|------|
+| GitHub | `api.github.com/search/repositories?q=...&sort=stars` | `GITHUB_TOKEN` (optional, 60 req/hr ללא) |
+| Reddit | `www.reddit.com/search.json?q=...&sort=relevance&t=year` | אין (User-Agent חובה) |
+| RSS | רשימה קבועה: simonwillison, changelog, github.blog | אין |
+| Perplexity | קיים ב-`perplexityService.ts` | `PERPLEXITY_API_KEY` |
+
+**Trust Score formula:**
+```
+score = log10(githubStars + 1) * 20
+      + log10(redditScore + 1) * 15
+      - (contributorCount > 15 ? 5 : 0)
+// capped at 100
+כל קריאה עם timeout 10s + graceful fallback (לא זורקת שגיאה).
+nexusDepartmentAgents.ts
+typescriptexport type DepartmentId = 'ceo'|'cto'|'cpo'|'rd'|'design'|'product'|'security'|'legal'|'marketing';
+
+export async function runAllDepartmentAgents(opts: {
+  departments: DepartmentId[];
+  ideaPrompt: string;
+  webIntelligence: WebIntelligenceResult;
+  codebaseContext: string;
+  models: AIProviderId[];
+  adminUserId?: string | null;
+  onDepartmentComplete?: (result: DepartmentResult) => void;
+}): Promise<DepartmentResult[]>
+// Promise.allSettled() — parallel execution
+// Reuses callAI() from multiProviderAI.ts
+מחלקות ופוקוס:
+מחלקהפוקוס מחקרסעיפי פלטCEOכדאיות עסקית, שוק, תחרות, ROIכדאיות / הזדמנות / מתחרים / החלטה (כן/לא/תלוי)CTOהיתכנות טכנית, ארכיטקטורה, tech stack, חוב טכניהיתכנות / ארכיטקטורה (Mermaid) / stack / risksCPOאסטרטגיית מוצר, UX, תעדוף (MoSCoW)פרופיל משתמש / ערך מוצע / UX / תעדוףR&Dספריות, repos GitHub, גישות מימוש, POCספריות (עם Trust Score) / גישות / POC / קישוריםDesignUI/UX patterns, WCAG 2.1 AA, design system, מגמות 2025מגמות / design system / accessibility / wireframeProductUser stories, acceptance criteria, sprint breakdownUser Stories (Given/When/Then) / AC / SprintSecurityOWASP Top 10, threat model, HIPAA-adjacent (מסמכי רפואה!)Threat Model / OWASP / דרישות / ComplianceLegalרישיונות OSS (GPL⚠️), GDPR, TOSרישיונות / Privacy / סיכונים / המלצותMarketingGTM, SEO, positioning, ניתוח תחרות שיווקימתחרים / positioning / SEO keywords / GTM
+nexusBriefOrchestrator.ts
+SSE helper:
+typescriptfunction sseWrite(res: Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  if (typeof (res as any).flush === 'function') (res as any).flush();
+}
+```
+
+**Pipeline בסדר:**
+1. Update status → `'researching'`, emit `start`
+2. `gatherProjectData()` → emit `codebase_ready`
+3. `gatherWebIntelligence()` → save to `nexusBriefWebSources` → emit `web_intelligence_done`
+4. `runAllDepartmentAgents()` (parallel) — לכל מחלקה שמסיימת: save to `nexusBriefDepartments` → emit `department_done`
+5. `assembleBrief()` → save to `nexusBriefs.assembledBrief`, status → `'review'` → emit `assembly_done`
+6. emit `done` + `res.end()`
+
+**Error recovery:** כשלון מחלקה = `department_error` + ממשיכים. כשלון קריטי = status חזרה ל-`'draft'` + emit `error`.
+
+### nexusAdminRoutes.ts
+
+Sub-router מ mount ב-`index.ts` כ-`/api/admin`:
+```
+POST   /nexus/briefs              יצירת brief (draft)
+GET    /nexus/briefs              רשימה (status filter, pagination)
+GET    /nexus/briefs/:id          פירוט מלא + departments + sources
+PATCH  /nexus/briefs/:id          עדכון (title, reviewNotes, status, assembledBrief)
+DELETE /nexus/briefs/:id          מחיקה (draft/rejected בלבד)
+
+POST   /nexus/briefs/:id/run      הפעל אורקסטרטור → SSE redirect
+GET    /nexus/briefs/:id/stream   SSE endpoint (Content-Type: text/event-stream)
+POST   /nexus/briefs/:id/approve  אישור → status:'approved'
+POST   /nexus/briefs/:id/reject   דחייה + reviewNotes
+POST   /nexus/briefs/:id/generate-tasks  יצירת devTasks + sprint
+
+GET    /nexus/models              רשימת מודלים זמינים
+GET    /nexus/departments         רשימת מחלקות עם שמות עבריים
+```
+
+Rate limit: `aiPostLimiter` על `/run` ו-`/generate-tasks`.
+
+SSE headers חובה:
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no   ← חובה למניעת nginx buffering
+Keepalive: res.write(':keepalive\n\n') כל 15 שניות.
+
+Phase 3–6 — Frontend
+AdminNexusHub.tsx (/admin/nexus)
+
+Header עם כפתור "צור ניירת חדשה"
+Tab filters: הכל / טיוטה / מחקר / בסקירה / אושר / דחוי / בפיתוח / הושלם
+כרטיסי brief: title, status badge (צבעוני), chips מחלקות, תאריך, עלות
+Click → navigate לפרטי brief
+
+AdminNexusBrief.tsx (/admin/nexus/briefs/:id)
+3 מצבים לפי brief.status:
+Draft — אשף יצירה:
+
+שלב 1: textarea גדול לרעיון
+שלב 2: בחירת מודלים (same UI כמו AdminProjectAnalyze)
+שלב 3: grid 3×3 של כרטיסי מחלקות — toggle select
+שלב 4: depth/scope (same options כמו AdminProjectAnalyze)
+כפתור "הפעל מחקר Nexus" → POST /run → connect SSE
+
+Researching — לייב:
+
+Progress bar: completedDepts/totalDepts * 80% + webDone*10% + assemblyDone*10%
+Web sources table עם Trust Score badge (ירוק>70, צהוב 40-70, אדום<40)
+Grid מחלקות: spinner / ✓ / ✗ + זמן
+Cost accumulator עדכון real-time
+
+Review/Approved — צפייה וסקירה:
+
+MarkdownRenderer לניירת המאוגדת (reuse קומפוננט קיים)
+Accordion למחלקות (output גולמי)
+Tabulated web sources
+Action bar (בסטטוס review בלבד): "אשר" / "ערוך" / "דחה"
+
+אישור → modal שואל "צור משימות פיתוח?" עם checkbox
+עריכה → inline editor על assembledBrief
+דחייה → modal עם textarea לנימוק
+
+
+
+Custom SSE hook:
+typescript// useNexusStream(briefId, onEvent): { connected, error, reconnect }
+// EventSource עם withCredentials: true
+// maxRetries: 1, auto-reconnect by browser spec
+adminNavConfig.ts
+typescript// הוספה ל-ICON_MAP:
+Cpu,
+
+// הוספת section חדש (group: 'dev'):
+{ id: 'nexus', label: 'Nexus – בית תוכנה', group: 'dev',
+  items: [{ path: '/admin/nexus', label: 'ניירות Nexus', icon: Cpu }] }
+AdminShell.tsx
+typescriptimport AdminNexusHub from './pages/AdminNexusHub';
+import AdminNexusBrief from './pages/AdminNexusBrief';
+// + 2 Route elements
+
+SSE Event Catalog
+EventDataמתיstart{ briefId, departments, totalDepts }תחילת אורקסטרטורcodebase_ready{ linesScanned, depth, scope }לאחר gatherProjectDataweb_intelligence_start{ query }לפני web gatheringweb_source_found{ sourceType, title, trustScore }לכל מקור (real-time feel)web_intelligence_done{ sourceCount, topSources }לאחר כל web gatheringdepartment_start{ department, hebrewName }לפני כל מחלקהdepartment_done{ department, tokensUsed, costUsd, outputPreview }לאחר שמירה ב-DBdepartment_error{ department, error }כישלון מחלקה (non-fatal)assembly_start{}לפני assemblyassembly_done{ briefId, assembledLength }status → 'review'done{ totalCostUsd, totalTokens, durationMs }סוףerror{ message, retryable }כישלון קריטי:keepalive(comment)כל 15 שניות
+
+Verification
+
+DB: npm run db:push ← לוודא 3 טבלאות חדשות ב-Supabase Studio
+SSE: פתח DevTools > Network > /stream endpoint — לראות event stream חי
+End-to-end flow: צור brief → הפעל → ראה מחלקות מסתיימות בזו אחר זו → אשר → בדוק devTasks שנוצרו בטבלה
+Trust Score: GitHub source עם stars > 1000 צריך לקבל score > 60
+Error resilience: Kill PERPLEXITY_API_KEY temp → וודא שאר המחלקות ממשיכות
+Rate limit: שלח 11 בקשות סימולטניות → לוודא 429 ב-11ה

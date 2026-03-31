@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>הגדרת ספרינט פעיל</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            font-size: 32px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        .step {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-right: 4px solid #667eea;
+        }
+        .step-number {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .step-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .step-desc {
+            color: #666;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+            text-align: center;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+            display: block;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+            display: block;
+        }
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+            display: block;
+        }
+        .emoji {
+            font-size: 24px;
+            margin-left: 10px;
+        }
+        .link {
+            display: inline-block;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 10px;
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .link:hover {
+            background: #667eea;
+            color: white;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #856404;
+        }
+        .warning-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 הגדרת ספרינט פעיל</h1>
+        <p class="subtitle">צור ספרינט פעיל כדי שהמפת דרכים תהיה קליקאבילית</p>
+
+        <div class="warning">
+            <div class="warning-title">⚠️ חשוב!</div>
+            <div>וודא שהשרת רץ על http://localhost:3006</div>
+        </div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">1</span>
+                צור טבלאות ספרינטים
+            </div>
+            <div class="step-desc">
+                יצירת טבלאות במסד הנתונים + ספרינט פעיל אוטומטי
+            </div>
+            <button onclick="createSprintTables()">צור טבלאות + ספרינט פעיל</button>
+        </div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">2</span>
+                בדוק שהספרינט נוצר
+            </div>
+            <div class="step-desc">
+                וודא שיש ספרינט פעיל במערכת
+            </div>
+            <button onclick="checkSprints()">בדוק ספרינטים</button>
+        </div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">3</span>
+                גש למפת הדרכים
+            </div>
+            <div class="step-desc">
+                עכשיו Phase 5 צריך להיות קליקאבילי!
+            </div>
+            <a href="http://localhost:5173/admin/settings/work-plan" class="link" target="_blank">
+                פתח מפת דרכים →
+            </a>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3006';
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.className = `status ${type}`;
+            status.innerHTML = message;
+        }
+
+        async function createSprintTables() {
+            showStatus('🔄 יוצר טבלאות וספרינט פעיל...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/create-sprint-tables`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    showStatus(`
+                        <span class="emoji">✅</span>
+                        הצלחה! טבלאות נוצרו + ספרינט פעיל נוצר!
+                        <br><br>
+                        <strong>Sprint 12: Calendar Integration</strong>
+                        <br>
+                        סטטוס: active
+                        <br>
+                        תאריכים: היום + 14 ימים
+                    `, 'success');
+                } else {
+                    showStatus(`<span class="emoji">❌</span> שגיאה: ${data.error || 'לא ידוע'}`, 'error');
+                }
+            } catch (err) {
+                showStatus(`
+                    <span class="emoji">❌</span>
+                    שגיאה בחיבור לשרת!
+                    <br><br>
+                    וודא שהשרת רץ: <code>npm run dev:server</code>
+                    <br><br>
+                    שגיאה: ${err.message}
+                `, 'error');
+            }
+        }
+
+        async function checkSprints() {
+            showStatus('🔄 בודק ספרינטים...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/sprints`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+
+                const sprints = await response.json();
+
+                if (Array.isArray(sprints)) {
+                    const activeSprints = sprints.filter(s => s.status === 'active');
+                    
+                    if (activeSprints.length > 0) {
+                        const sprint = activeSprints[0];
+                        showStatus(`
+                            <span class="emoji">✅</span>
+                            מצאתי ספרינט פעיל!
+                            <br><br>
+                            <strong>${sprint.name}</strong>
+                            <br>
+                            ID: ${sprint.id}
+                            <br>
+                            סטטוס: ${sprint.status}
+                            <br><br>
+                            <strong>Phase 5 צריך להיות קליקאבילי עכשיו!</strong>
+                        `, 'success');
+                    } else {
+                        showStatus(`
+                            <span class="emoji">⚠️</span>
+                            יש ${sprints.length} ספרינטים אבל אף אחד לא פעיל
+                            <br><br>
+                            לחץ על "צור טבלאות + ספרינט פעיל" למעלה
+                        `, 'error');
+                    }
+                } else {
+                    showStatus(`<span class="emoji">❌</span> תשובה לא תקינה מהשרת`, 'error');
+                }
+            } catch (err) {
+                showStatus(`
+                    <span class="emoji">❌</span>
+                    שגיאה בחיבור לשרת!
+                    <br><br>
+                    וודא שהשרת רץ: <code>npm run dev:server</code>
+                    <br><br>
+                    שגיאה: ${err.message}
+                `, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

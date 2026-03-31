@@ -1,0 +1,54 @@
+---
+description: MemorAId UX/UI Hard Rules – enforce design system compliance for all UI changes
+globs: client/src/**/*.tsx,client/src/**/*.css
+alwaysApply: false
+---
+
+# MemorAId UX/UI Rules
+
+All UI work must follow `docs/UX_UI_MASTER.md`. The full spec is in `docs/UX_UI_*.md`.
+
+## Hard Rules (blocking)
+
+- No `max-width` that leaves >30% empty on wide screens
+- No internal card/section padding < 12px
+- No button height < 36px
+- No `font-size` < 11px (except metadata)
+- No contrast < 4.5:1 for regular text / < 3:1 for large text
+- No `gap` < 4px between elements (except inline)
+- No `border-radius` > 16px (except `rounded-full`)
+- No arbitrary px/rem/color values – use Tokens from `client/src/index.css`
+- No `:focus { outline: none }` without `:focus-visible` alternative
+- No `<img>` without `alt`
+- No icon-only button without `aria-label`
+- No placeholder as sole label – always use `<label>`
+- No error message that says only "שגיאה" – must include what+why+action
+- Sidebar must visually mark the active page
+
+## Before every PR touching UI
+
+Run through `docs/UX_UI_ACCESSIBILITY_CHECKLIST.md` sections A–I.
+
+## Tokens
+
+Colors: `hsl(var(--token))` only. See `docs/UX_UI_TOKENS.md`.
+Spacing: Tailwind scale only (space-1..24). See Spec §13.
+Radius: `rounded-md` (8px), `rounded-xl` (12px), `rounded-full` only.
+
+## Components
+
+Use existing classes from `client/src/styles/design-system.css`:
+- `.section-compact` / `.section-card` for all cards/sections
+- `.data-row` for label|value rows
+- `.badge`, `.badge-primary`, `.badge-success`, `.badge-destructive` for badges
+- `.btn-primary` / `.btn-outline` for user app buttons
+
+## Content
+
+Button labels: verb first ("שמור", "הוסף מטופל", "פתח מדריך" – not "שלח בקשה" unless workflow exists).
+Loading states: "שומר...", "שולח...", "מוחק...".
+Errors: [מה קרה] + [למה] + [מה לעשות].
+
+## RTL
+
+Use `inline-start/end` logical properties. Flip directional icons with `rtl:-scale-x-100`.

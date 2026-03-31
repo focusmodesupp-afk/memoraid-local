@@ -1,0 +1,204 @@
+{
+  "name": "NEXUS Research Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research_pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "research-pipeline"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.body.ideaPrompt }}" },
+            { "name": "sort", "value": "stars" },
+            { "name": "per_page", "value": "10" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/vnd.github.v3+json" },
+            { "name": "User-Agent", "value": "MEMORAID-Nexus" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "github-search",
+      "name": "GitHub Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const repos = (item.json.items || []).slice(0, 5);\n  for (const repo of repos) {\n    const trustScore = Math.min(100, Math.round(Math.log10((repo.stargazers_count || 0) + 1) * 20 + Math.log10((repo.forks_count || 0) + 1) * 10));\n    results.push({\n      json: {\n        sourceType: 'github',\n        url: repo.html_url,\n        title: repo.full_name + ' — ' + (repo.description || '').slice(0, 150),\n        snippet: `Stars: ${repo.stargazers_count} | Forks: ${repo.forks_count} | Language: ${repo.language || 'N/A'} | Updated: ${repo.updated_at}`,\n        trustScore,\n        githubStars: repo.stargazers_count,\n        contributorCount: repo.forks_count,\n        rawPayload: { source: 'n8n', workflow: 'research', repoId: repo.id }\n      }\n    });\n  }\n}\nreturn results.length > 0 ? results : [{ json: { sourceType: 'github', url: '', title: 'No results', snippet: '', trustScore: 0, rawPayload: {} } }];"
+      },
+      "id": "github-parse",
+      "name": "Parse GitHub",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.body.ideaPrompt }}" },
+            { "name": "sort", "value": "relevance" },
+            { "name": "limit", "value": "10" },
+            { "name": "t", "value": "year" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "MEMORAID-Nexus/1.0" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "reddit-search",
+      "name": "Reddit Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const posts = (item.json.data?.children || []).slice(0, 5);\n  for (const post of posts) {\n    const d = post.data;\n    const trustScore = Math.min(100, Math.round(Math.log10((d.score || 0) + 1) * 15 + (d.num_comments > 10 ? 15 : 5)));\n    results.push({\n      json: {\n        sourceType: 'reddit',\n        url: 'https://reddit.com' + d.permalink,\n        title: (d.title || '').slice(0, 200),\n        snippet: (d.selftext || '').slice(0, 300),\n        trustScore,\n        redditScore: d.score,\n        rawPayload: { source: 'n8n', workflow: 'research', subreddit: d.subreddit }\n      }\n    });\n  }\n}\nreturn results.length > 0 ? results : [{ json: { sourceType: 'reddit', url: '', title: 'No results', snippet: '', trustScore: 0, rawPayload: {} } }];"
+      },
+      "id": "reddit-parse",
+      "name": "Parse Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.perplexity.ai/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.PERPLEXITY_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: 'Research the following topic for a software project. Provide key findings, relevant technologies, best practices, and potential challenges. Topic: ' + $json.body.ideaPrompt }] }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "perplexity-search",
+      "name": "Perplexity Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const content = item.json.choices?.[0]?.message?.content || '';\n  const citations = item.json.citations || [];\n  results.push({\n    json: {\n      sourceType: 'perplexity',\n      url: 'https://www.perplexity.ai',\n      title: 'Perplexity AI Research Summary',\n      snippet: content.slice(0, 500),\n      trustScore: 75,\n      rawPayload: { source: 'n8n', workflow: 'research', citations, fullContent: content }\n    }\n  });\n  for (const cite of citations.slice(0, 3)) {\n    results.push({\n      json: {\n        sourceType: 'perplexity',\n        url: cite,\n        title: 'Citation: ' + cite.split('/').pop(),\n        snippet: '',\n        trustScore: 60,\n        rawPayload: { source: 'n8n', citedBy: 'perplexity' }\n      }\n    });\n  }\n}\nreturn results;"
+      },
+      "id": "perplexity-parse",
+      "name": "Parse Perplexity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allSources = [];\nfor (const item of $input.all()) {\n  if (item.json.sourceType && item.json.title !== 'No results') {\n    allSources.push(item.json);\n  }\n}\n\n// Sort by trust score\nallSources.sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0));\n\nreturn [{ json: { sources: allSources, count: allSources.length } }];"
+      },
+      "id": "merge-sources",
+      "name": "Merge & Rank Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://host.docker.internal:3001/api/admin/nexus/briefs/' + $('Webhook Trigger').item.json.body.briefId + '/n8n-callback' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ briefId: $('Webhook Trigger').item.json.body.briefId, workflowType: 'full_research', sources: $json.sources, metadata: { workflowName: 'NEXUS Research Pipeline', durationMs: Date.now() } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "callback-memoraid",
+      "name": "Send to MEMORAID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, sources: $('Merge & Rank Sources').item.json.count, saved: $json.saved || 0 }) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          { "node": "GitHub Search", "type": "main", "index": 0 },
+          { "node": "Reddit Search", "type": "main", "index": 0 },
+          { "node": "Perplexity Research", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "GitHub Search": {
+      "main": [[ { "node": "Parse GitHub", "type": "main", "index": 0 } ]]
+    },
+    "Parse GitHub": {
+      "main": [[ { "node": "Merge & Rank Sources", "type": "main", "index": 0 } ]]
+    },
+    "Reddit Search": {
+      "main": [[ { "node": "Parse Reddit", "type": "main", "index": 0 } ]]
+    },
+    "Parse Reddit": {
+      "main": [[ { "node": "Merge & Rank Sources", "type": "main", "index": 0 } ]]
+    },
+    "Perplexity Research": {
+      "main": [[ { "node": "Parse Perplexity", "type": "main", "index": 0 } ]]
+    },
+    "Parse Perplexity": {
+      "main": [[ { "node": "Merge & Rank Sources", "type": "main", "index": 0 } ]]
+    },
+    "Merge & Rank Sources": {
+      "main": [[ { "node": "Send to MEMORAID", "type": "main", "index": 0 } ]]
+    },
+    "Send to MEMORAID": {
+      "main": [[ { "node": "Respond to Webhook", "type": "main", "index": 0 } ]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "NEXUS" }]
+}

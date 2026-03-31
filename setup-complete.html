@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>הגדרה מלאה - MemorAid Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            font-size: 36px;
+            margin-bottom: 10px;
+            text-align: center;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .subtitle {
+            color: rgba(255,255,255,0.9);
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 18px;
+        }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .card-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .card-desc {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+            margin-bottom: 10px;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        button.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        button.error {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+        }
+        .emoji {
+            font-size: 24px;
+        }
+        .progress {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 8px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .link {
+            display: inline-block;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 10px;
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .link:hover {
+            background: #667eea;
+            color: white;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #856404;
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #e83e8c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 הגדרה מלאה</h1>
+        <p class="subtitle">הגדרת כל הטבלאות והנתונים הדרושים</p>
+
+        <div class="warning">
+            <strong>⚠️ חשוב!</strong> וודא שהשרת רץ על <code>http://localhost:3006</code>
+            <br>הרץ: <code>npm run dev:server</code>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">📊</span>
+                התקדמות
+            </div>
+            <div class="progress">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div id="progress-text" style="text-align: center; color: #666; margin-top: 10px;">
+                0 / 4 הושלמו
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">1️⃣</span>
+                טבלאות Kanban
+            </div>
+            <div class="card-desc">
+                יצירת טבלאות לקנבאן פיתוח + 20 משימות ברירת מחדל
+            </div>
+            <button id="btn-kanban" onclick="setupKanban()">צור טבלאות Kanban</button>
+            <div id="status-kanban"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">2️⃣</span>
+                טבלאות ספרינטים
+            </div>
+            <div class="card-desc">
+                יצירת טבלאות ספרינטים + ספרינט פעיל אוטומטי
+            </div>
+            <button id="btn-sprints" onclick="setupSprints()">צור טבלאות ספרינטים</button>
+            <div id="status-sprints"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">3️⃣</span>
+                טבלאות Pipelines
+            </div>
+            <div class="card-desc">
+                יצירת טבלאות Pipelines + 10 pipelines ברירת מחדל
+            </div>
+            <button id="btn-pipelines" onclick="setupPipelines()">צור טבלאות Pipelines</button>
+            <div id="status-pipelines"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">4️⃣</span>
+                עדכון סיסמת Admin
+            </div>
+            <div class="card-desc">
+                עדכון סיסמה ל-<code>MeMo@@2025@@</code> עבור <code>yoav@memoraid.co</code>
+            </div>
+            <button id="btn-password" onclick="updatePassword()">עדכן סיסמה</button>
+            <div id="status-password"></div>
+        </div>
+
+        <div class="card" id="final-card" style="display: none;">
+            <div class="card-title">
+                <span class="emoji">✅</span>
+                הכל מוכן!
+            </div>
+            <div class="card-desc">
+                כל הטבלאות נוצרו בהצלחה. עכשיו אפשר להתחיל לעבוד!
+            </div>
+            <a href="http://localhost:5173/admin/login" class="link" target="_blank">
+                התחבר למערכת Admin →
+            </a>
+            <br><br>
+            <a href="http://localhost:5173/admin/settings/work-plan" class="link" target="_blank">
+                פתח מפת דרכים →
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3006';
+        let completedSteps = 0;
+
+        function updateProgress() {
+            completedSteps++;
+            const progress = (completedSteps / 4) * 100;
+            document.getElementById('progress-bar').style.width = progress + '%';
+            document.getElementById('progress-text').textContent = `${completedSteps} / 4 הושלמו`;
+            
+            if (completedSteps === 4) {
+                document.getElementById('final-card').style.display = 'block';
+                document.getElementById('final-card').scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        function showStatus(id, message, type) {
+            const status = document.getElementById('status-' + id);
+            status.className = `status ${type}`;
+            status.innerHTML = message;
+        }
+
+        function setButtonState(id, state) {
+            const btn = document.getElementById('btn-' + id);
+            if (state === 'loading') {
+                btn.disabled = true;
+                btn.textContent = 'מעבד...';
+            } else if (state === 'success') {
+                btn.disabled = true;
+                btn.className = 'success';
+                btn.textContent = '✓ הושלם';
+            } else if (state === 'error') {
+                btn.disabled = false;
+                btn.className = 'error';
+                btn.textContent = 'נסה שוב';
+            }
+        }
+
+        async function setupKanban() {
+            setButtonState('kanban', 'loading');
+            showStatus('kanban', '🔄 יוצר טבלאות Kanban...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/create-dev-kanban-tables`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    setButtonState('kanban', 'success');
+                    showStatus('kanban', `
+                        <span class="emoji">✅</span>
+                        <strong>הצלחה!</strong><br>
+                        נוצרו: dev_columns, dev_tasks, dev_comments<br>
+                        נוצרו 4 עמודות + 20 משימות
+                    `, 'success');
+                    updateProgress();
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (err) {
+                setButtonState('kanban', 'error');
+                showStatus('kanban', `
+                    <span class="emoji">❌</span>
+                    <strong>שגיאה:</strong> ${err.message}<br>
+                    וודא שהשרת רץ: <code>npm run dev:server</code>
+                `, 'error');
+            }
+        }
+
+        async function setupSprints() {
+            setButtonState('sprints', 'loading');
+            showStatus('sprints', '🔄 יוצר טבלאות ספרינטים...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/create-sprint-tables`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    setButtonState('sprints', 'success');
+                    showStatus('sprints', `
+                        <span class="emoji">✅</span>
+                        <strong>הצלחה!</strong><br>
+                        נוצרו: sprints, sprint_tasks, sprint_activities<br>
+                        נוצר ספרינט פעיל: <strong>Sprint 12: Calendar Integration</strong>
+                    `, 'success');
+                    updateProgress();
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (err) {
+                setButtonState('sprints', 'error');
+                showStatus('sprints', `
+                    <span class="emoji">❌</span>
+                    <strong>שגיאה:</strong> ${err.message}
+                `, 'error');
+            }
+        }
+
+        async function setupPipelines() {
+            setButtonState('pipelines', 'loading');
+            showStatus('pipelines', '🔄 יוצר טבלאות Pipelines...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/create-pipeline-tables`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    setButtonState('pipelines', 'success');
+                    showStatus('pipelines', `
+                        <span class="emoji">✅</span>
+                        <strong>הצלחה!</strong><br>
+                        נוצרו: pipelines, pipeline_runs, pipeline_stages, pipeline_alerts<br>
+                        נוצרו 10 pipelines ברירת מחדל
+                    `, 'success');
+                    updateProgress();
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (err) {
+                setButtonState('pipelines', 'error');
+                showStatus('pipelines', `
+                    <span class="emoji">❌</span>
+                    <strong>שגיאה:</strong> ${err.message}
+                `, 'error');
+            }
+        }
+
+        async function updatePassword() {
+            setButtonState('password', 'loading');
+            showStatus('password', '🔄 מעדכן סיסמה...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/update-admin-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    setButtonState('password', 'success');
+                    showStatus('password', `
+                        <span class="emoji">✅</span>
+                        <strong>הצלחה!</strong><br>
+                        סיסמה עודכנה ל: <code>MeMo@@2025@@</code><br>
+                        עבור: <code>yoav@memoraid.co</code>
+                    `, 'success');
+                    updateProgress();
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (err) {
+                setButtonState('password', 'error');
+                showStatus('password', `
+                    <span class="emoji">❌</span>
+                    <strong>שגיאה:</strong> ${err.message}
+                `, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

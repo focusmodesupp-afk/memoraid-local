@@ -2,73 +2,298 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
 @layer base {
   :root {
-    --background: 270 20% 99%;
-    --foreground: 260 15% 15%;
-    --card: 0 0% 100%;
-    --card-foreground: 260 15% 15%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 260 15% 15%;
-    --primary: 261 84% 56%;
+    /* Core light palette – EXACTLY from UX spec */
+    --background: 250 45% 96%;
+    --foreground: 253 50% 8%;
+    --card: 253 40% 99%;
+    --card-foreground: 253 50% 8%;
+    --popover: 253 40% 99%;
+    --popover-foreground: 253 50% 8%;
+
+    --primary: 253 79% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 260 40% 96%;
-    --secondary-foreground: 260 15% 20%;
-    --muted: 260 40% 96%;
-    --muted-foreground: 260 10% 45%;
-    --accent: 280 75% 60%;
-    --accent-foreground: 260 10% 98%;
-    --destructive: 0 84% 60%;
+    --accent: 280 65% 55%;
+    --accent-foreground: 0 0% 100%;
+    --secondary: 200 60% 92%;
+    --secondary-foreground: 253 50% 8%;
+
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 260 25% 90%;
-    --input: 260 25% 90%;
-    --ring: 261 84% 56%;
-    --sidebar: 260 30% 13%;
+    --success: 142 71% 45%;
+    --warning: 320 75% 55%;
+    --info: 200 85% 52%;
+
+    --muted: 253 35% 95%;
+    --muted-foreground: 253 15% 45%;
+
+    --border: 253 30% 88%;
+    --input: 253 25% 92%;
+    --ring: 253 79% 58%;
+
+    /* Charts */
+    --chart-1: 253 79% 58%;
+    --chart-2: 200 85% 52%;
+    --chart-3: 320 70% 58%;
+    --chart-4: 142 71% 45%;
+    --chart-5: 38 92% 50%;
+
+    /* Sidebar */
+    --sidebar: 253 79% 58%;
     --sidebar-foreground: 0 0% 100%;
-    --radius: 1rem;
+    --sidebar-accent: 253 85% 70%;
+    --sidebar-border: 253 70% 50%;
+
+    /* Layout */
+    --radius: 0.5rem;
   }
 
   .dark {
-    --background: 260 18% 9%;
-    --foreground: 0 0% 98%;
-    --card: 260 15% 12%;
-    --card-foreground: 0 0% 98%;
-    --popover: 260 15% 12%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 261 84% 66%;
-    --primary-foreground: 260 20% 10%;
-    --secondary: 260 15% 20%;
+    /* Core dark palette – EXACTLY from UX spec */
+    --background: 250 40% 14%;
+    --foreground: 253 15% 95%;
+    --card: 253 30% 12%;
+    --card-foreground: 253 15% 95%;
+    --popover: 253 30% 12%;
+    --popover-foreground: 253 15% 95%;
+
+    --primary: 253 79% 62%;
+    --primary-foreground: 253 20% 10%;
+    --accent: 280 65% 60%;
+    --accent-foreground: 253 20% 10%;
+    --secondary: 200 50% 25%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 260 15% 20%;
-    --muted-foreground: 260 10% 70%;
-    --accent: 280 80% 70%;
-    --accent-foreground: 260 20% 10%;
-    --destructive: 0 72% 51%;
+
+    --destructive: 0 65% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 260 15% 25%;
-    --input: 260 15% 25%;
-    --ring: 261 84% 66%;
-    --sidebar: 260 20% 8%;
+    --success: 142 60% 52%;
+    --warning: 320 70% 62%;
+    --info: 200 75% 58%;
+
+    --muted: 253 25% 18%;
+    --muted-foreground: 253 10% 65%;
+
+    --border: 253 20% 22%;
+    --input: 253 20% 25%;
+    --ring: 253 79% 62%;
+
+    --sidebar: 253 75% 45%;
     --sidebar-foreground: 0 0% 98%;
+    --sidebar-accent: 253 70% 55%;
+    --sidebar-border: 253 60% 45%;
   }
 
   body {
     @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))];
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    direction: rtl;
+    text-align: right;
   }
 }
 
 @layer components {
+  /* ─── Base Cards ─── */
   .card {
-    @apply rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-sm;
+    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-sm;
   }
 
+  /* ─── Buttons ─── */
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium text-white shadow-sm transition;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg h-9 px-4 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2;
     background-color: hsl(var(--primary));
   }
 
   .btn-outline {
-    @apply inline-flex items-center justify-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-2 text-sm font-medium text-[hsl(var(--foreground))] shadow-sm transition;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg h-9 border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 text-sm font-medium text-[hsl(var(--foreground))] shadow-sm transition-all duration-150 hover:bg-[hsl(var(--muted))] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg h-9 px-4 text-sm font-medium text-[hsl(var(--foreground))] transition-all duration-150 hover:bg-[hsl(var(--muted))] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2;
+  }
+
+  .btn-primary-xs {
+    @apply inline-flex items-center justify-center gap-1 rounded-md h-7 px-2.5 text-xs font-medium text-white transition-all hover:opacity-90 disabled:opacity-50;
+    background-color: hsl(var(--primary));
+  }
+
+  .btn-ghost-xs {
+    @apply inline-flex items-center justify-center gap-1 rounded-md h-7 px-2.5 text-xs font-medium text-[hsl(var(--muted-foreground))] transition-all hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg h-9 px-4 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--destructive))] focus-visible:ring-offset-2;
+    background-color: hsl(var(--destructive));
+  }
+
+  /* ─── Section / Card variants ─── */
+  .section-compact {
+    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-sm;
+  }
+
+  .section-card {
+    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-sm transition-shadow hover:shadow-md;
+  }
+
+  .card-compact {
+    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-sm;
+  }
+
+  /* ─── Page header ─── */
+  .page-header {
+    @apply flex flex-col justify-between gap-3 sm:flex-row sm:items-center;
+  }
+
+  .page-title {
+    @apply text-xl font-bold tracking-tight text-[hsl(var(--foreground))];
+  }
+
+  .page-subtitle {
+    @apply text-sm text-[hsl(var(--muted-foreground))] mt-0.5;
+  }
+
+  /* ─── Section titles ─── */
+  .section-title {
+    @apply text-sm font-semibold text-[hsl(var(--foreground))];
+  }
+
+  .section-label {
+    @apply text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))];
+  }
+
+  /* ─── Data row ─── */
+  .data-row {
+    @apply flex items-baseline justify-between gap-4 py-2 text-sm border-b border-[hsl(var(--border))]/40 last:border-0;
+  }
+
+  .data-row-label {
+    @apply text-xs font-medium text-[hsl(var(--muted-foreground))] shrink-0;
+  }
+
+  .data-row-value {
+    @apply text-sm text-[hsl(var(--foreground))] text-end min-w-0 truncate font-medium;
+  }
+
+  /* ─── Badge row ─── */
+  .badge-row {
+    @apply flex flex-wrap gap-2 items-center;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .badge-muted {
+    @apply bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))];
+  }
+
+  .badge-primary {
+    background-color: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary));
+  }
+
+  .badge-success {
+    background-color: hsl(var(--success) / 0.12);
+    color: hsl(var(--success));
+  }
+
+  .badge-destructive {
+    background-color: hsl(var(--destructive) / 0.12);
+    color: hsl(var(--destructive));
+  }
+
+  .badge-warning {
+    background-color: hsl(var(--warning) / 0.12);
+    color: hsl(var(--warning));
+  }
+
+  /* ─── KPI stat card ─── */
+  .stat-card {
+    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-sm flex flex-col gap-1;
+  }
+
+  .stat-value {
+    @apply text-2xl font-bold text-[hsl(var(--foreground))];
+  }
+
+  .stat-label {
+    @apply text-xs font-medium text-[hsl(var(--muted-foreground))];
+  }
+
+  /* ─── Empty states ─── */
+  .empty-inline {
+    @apply text-xs text-[hsl(var(--muted-foreground))] italic;
+  }
+
+  .empty-block {
+    @apply flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-[hsl(var(--muted-foreground))];
+  }
+
+  /* ─── Compact list ─── */
+  .list-compact {
+    @apply space-y-1.5;
+  }
+
+  /* ─── Input / Form ─── */
+  .input-base {
+    @apply w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 h-9 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:border-[hsl(var(--ring))];
+  }
+
+  .label-base {
+    @apply block text-xs font-semibold text-[hsl(var(--foreground))] mb-1;
+  }
+
+  /* ─── Progress bar ─── */
+  .progress-bar {
+    @apply h-2 w-full rounded-full bg-[hsl(var(--muted))] overflow-hidden;
+  }
+
+  .progress-bar-fill {
+    @apply h-full rounded-full bg-[hsl(var(--primary))] transition-all duration-500 ease-out;
+  }
+
+  /* ─── Tag / chip ─── */
+  .tag {
+    @apply inline-flex items-center rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-0.5 text-xs text-[hsl(var(--muted-foreground))];
+  }
+
+  /* ─── Admin UI ─── */
+  .admin-input {
+    @apply w-full px-3 py-2 rounded-lg bg-slate-700/80 border border-slate-600 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors;
+  }
+  .admin-btn-primary {
+    @apply px-4 py-2.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2;
+  }
+  .admin-btn-secondary {
+    @apply px-4 py-2.5 rounded-lg bg-slate-600/80 text-slate-200 hover:bg-slate-500 border border-slate-500 transition-colors;
+  }
+  .admin-btn-danger {
+    @apply px-4 py-2.5 rounded-lg bg-red-500 text-white hover:bg-red-400 shadow-md transition-colors;
+  }
+  .admin-card {
+    @apply rounded-xl border border-slate-600 bg-slate-800/50 p-4;
+  }
+  .admin-muted { @apply text-slate-400; }
+  .admin-page-title { @apply text-2xl font-bold text-slate-100; }
+  .admin-table-card {
+    @apply rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden;
+  }
+  .admin-table-th {
+    @apply sticky top-0 bg-slate-800 text-slate-400 z-10;
   }
 }

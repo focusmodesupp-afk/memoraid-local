@@ -1,0 +1,17 @@
+---
+description: כללים למניעת שבירת כניסה (משתמשים + Admin)
+globs: server/src/routes.ts, server/src/adminRoutes.ts, shared/schemas/schema.ts
+---
+
+# Auth Resilience Rules
+
+## לפני שינוי ב-Auth או סכמה
+
+1. **סכמה** – אם מוסיפים עמודה/טבלה: להוסיף מיגרציה ולהריץ אותה.
+2. **לוגיקה אופציונלית** – family_members, primary_family_id, audit_log – לעטוף ב-try/catch. כשנכשל – fallback, לא לזרוק.
+3. **ליבת Auth** – sessions, users, admin_users, admin_sessions – לא לגעת בלי בדיקה. Short-circuit אם אין token.
+
+## אחרי שינוי
+
+- להריץ `npm run check:auth` (השרת חייב לרוץ).
+- ראה docs/AUTH_DEVELOPMENT.md

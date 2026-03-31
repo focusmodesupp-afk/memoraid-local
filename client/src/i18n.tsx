@@ -29,7 +29,7 @@ type Messages = {
 
 const messages: Record<Lang, Messages> = {
   he: {
-    appTitle: 'MemoRaid — טיפול משפחתי מתואם',
+    appTitle: 'MemorAId — טיפול משפחתי מתואם',
     navDashboard: 'לוח בקרה',
     navPatient: 'מטופל',
     navTasks: 'משימות',
@@ -53,7 +53,7 @@ const messages: Record<Lang, Messages> = {
     emptyActivity: 'כשהתחילו להתבצע משימות, תורים ומסמכים – ציר הזמן הקצר יוצג כאן.',
   },
   en: {
-    appTitle: 'MemoRaid — Coordinated Family Care',
+    appTitle: 'MemorAId — Coordinated Family Care',
     navDashboard: 'Dashboard',
     navPatient: 'Patient',
     navTasks: 'Tasks',
