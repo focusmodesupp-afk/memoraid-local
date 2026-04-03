@@ -825,6 +825,9 @@ const startServer = (port: number) => {
       } catch { /* seed already applied or no matching row */ }
     }
 
+    // Patch 0042: add department column to nexus_brief_web_sources (per-agent deep research)
+    await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS department VARCHAR(32)`);
+
     console.log('DB: schema patches applied');
   } catch (err: any) {
     console.error('DB startup check FAILED:', err?.code || '', err?.message || err);

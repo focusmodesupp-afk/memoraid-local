@@ -1,0 +1,198 @@
+{
+  "name": "NEXUS — Per-Department Research",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dept_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-dept-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build department-focused search queries from incoming context\n// Handles both direct webhook and sub-workflow calls\nconst raw = $input.first().json;\nconst data = raw.body || raw;\n\nconst {\n  briefId = '',\n  ideaPrompt = '',\n  department = '',\n  departmentRole = '',\n  skills = [],\n  domainExpertise = [],\n  specialSources = {}\n} = data;\n\nconst {\n  subreddits = [],\n  githubQualifiers = [],\n  searchKeywords = [],\n  perplexityFocusTemplate = ''\n} = specialSources;\n\n// Build GitHub query with qualifiers\nconst ghQuery = [ideaPrompt.slice(0, 80), ...githubQualifiers].join(' ');\n\n// Build Reddit queries — one per subreddit (max 3)\nconst redditQueries = subreddits.slice(0, 3).map(sub => ({\n  subreddit: sub,\n  query: `${ideaPrompt.slice(0, 80)} ${searchKeywords.slice(0, 2).join(' ')}`.trim()\n}));\n\n// Build Perplexity prompt with department context\nconst skillStr = skills.length > 0 ? `\\nTeam skills: ${skills.slice(0, 5).join(', ')}.` : '';\nconst domainStr = domainExpertise.length > 0 ? `\\nDomain expertise: ${domainExpertise.slice(0, 3).join(', ')}.` : '';\nconst pplxPrompt = perplexityFocusTemplate\n  ? perplexityFocusTemplate.replace('{idea}', ideaPrompt) + skillStr + domainStr + '\\nBe concise (max 400 words). Include URLs.'\n  : `Research about \"${ideaPrompt}\" from the perspective of ${departmentRole}. Focus areas: ${searchKeywords.join(', ')}.${skillStr}${domainStr}\\nBe concise (max 400 words). Include URLs.`;\n\nreturn [{ json: {\n  briefId,\n  department,\n  departmentRole,\n  githubQuery: ghQuery,\n  redditQueries,\n  perplexityPrompt: pplxPrompt,\n  hasPerplexity: !!$env.PERPLEXITY_API_KEY\n}}];"
+      },
+      "id": "build-queries",
+      "name": "Build Dept Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.github.com/search/repositories?q={{ encodeURIComponent($json.githubQuery) }}&sort=stars&per_page=5",
+        "options": {
+          "timeout": 10000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "NEXUS-Research-Bot/1.0"
+            }
+          ]
+        }
+      },
+      "id": "github-search",
+      "name": "GitHub Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [730, 120],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan out reddit queries — one HTTP request per subreddit\nconst { redditQueries = [] } = $input.first().json;\nreturn redditQueries.map(rq => ({ json: rq }));"
+      },
+      "id": "fan-out-reddit",
+      "name": "Fan Out Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [730, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.reddit.com/r/{{ $json.subreddit }}/search.json?q={{ encodeURIComponent($json.query) }}&restrict_sr=1&sort=relevance&limit=3&t=year",
+        "options": {
+          "timeout": 10000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "NEXUS-Research-Bot/1.0"
+            }
+          ]
+        }
+      },
+      "id": "reddit-search",
+      "name": "Reddit Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [950, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.perplexity.ai/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: $json.perplexityPrompt }], max_tokens: 600 }) }}",
+        "options": {
+          "timeout": 15000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PERPLEXITY_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "perplexity-search",
+      "name": "Perplexity Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [730, 500],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge and score all results from GitHub, Reddit, and Perplexity\n// Get parent data for department info\nconst parentData = $('Build Dept Queries').first().json;\nconst department = parentData.department || '';\nconst allSources = [];\n\n// Process GitHub results\ntry {\n  const ghData = $('GitHub Search').first().json;\n  const items = ghData?.items || [];\n  for (const repo of items.slice(0, 5)) {\n    const stars = repo.stargazers_count || 0;\n    const forks = repo.forks_count || 0;\n    const trustScore = Math.min(100, Math.round(Math.log10(stars + 1) * 20 + Math.log10(forks + 1) * 5));\n    allSources.push({\n      sourceType: 'github',\n      url: repo.html_url || '',\n      title: repo.full_name || '',\n      snippet: (repo.description || '').slice(0, 300),\n      trustScore,\n      githubStars: stars,\n      department,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'dept_research',\n        language: repo.language,\n        topics: repo.topics || [],\n        updatedAt: repo.updated_at\n      }\n    });\n  }\n} catch (e) { /* GitHub failed, continue */ }\n\n// Process Reddit results\ntry {\n  for (const item of $('Reddit Search').all()) {\n    const data = item.json?.data;\n    if (!data?.children) continue;\n    for (const child of data.children) {\n      const post = child.data;\n      if (!post || !post.title) continue;\n      const score = post.score || 0;\n      const upvoteRatio = post.upvote_ratio || 0.5;\n      let trustScore = Math.round(Math.log10(score + 1) * 15);\n      if (upvoteRatio > 0.85) trustScore += 5;\n      trustScore = Math.min(100, Math.max(0, trustScore));\n      allSources.push({\n        sourceType: 'reddit',\n        url: `https://reddit.com${post.permalink}`,\n        title: post.title.slice(0, 500),\n        snippet: (post.selftext || post.title).slice(0, 300),\n        trustScore,\n        redditScore: score,\n        department,\n        rawPayload: {\n          source: 'n8n',\n          workflowType: 'dept_research',\n          subreddit: post.subreddit,\n          numComments: post.num_comments,\n          upvoteRatio\n        }\n      });\n    }\n  }\n} catch (e) { /* Reddit failed, continue */ }\n\n// Process Perplexity results\ntry {\n  const pplxData = $('Perplexity Search').first().json;\n  const content = pplxData?.choices?.[0]?.message?.content || '';\n  const citations = (pplxData?.citations || []).filter(u => typeof u === 'string' && u.startsWith('http'));\n  if (content) {\n    allSources.push({\n      sourceType: 'perplexity',\n      url: citations[0] || 'https://www.perplexity.ai',\n      title: `[${department}] Perplexity Deep Research`,\n      snippet: content.slice(0, 500),\n      trustScore: 75,\n      department,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'dept_research',\n        citations,\n        contentLength: content.length\n      }\n    });\n    // Add citations as separate sources\n    for (const cite of citations.slice(0, 2)) {\n      try {\n        allSources.push({\n          sourceType: 'perplexity',\n          url: cite,\n          title: `[${department}] ${new URL(cite).hostname}`,\n          snippet: '',\n          trustScore: 60,\n          department,\n          rawPayload: { source: 'n8n', workflowType: 'dept_research', citedBy: 'perplexity' }\n        });\n      } catch { /* invalid URL */ }\n    }\n  }\n} catch (e) { /* Perplexity failed, continue */ }\n\n// Deduplicate and sort\nconst seen = new Set();\nconst unique = allSources\n  .sort((a, b) => b.trustScore - a.trustScore)\n  .filter(s => {\n    if (!s.url || seen.has(s.url)) return false;\n    seen.add(s.url);\n    return true;\n  })\n  .slice(0, 8);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    department,\n    workflowName: 'nexus-dept-research',\n    totalFound: allSources.length,\n    uniqueSources: unique.length\n  }\n}}];"
+      },
+      "id": "merge-and-score",
+      "name": "Merge and Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1420, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Build Dept Queries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Dept Queries": {
+      "main": [
+        [
+          { "node": "GitHub Search", "type": "main", "index": 0 },
+          { "node": "Fan Out Reddit", "type": "main", "index": 0 },
+          { "node": "Perplexity Search", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fan Out Reddit": {
+      "main": [
+        [{ "node": "Reddit Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "GitHub Search": {
+      "main": [
+        [{ "node": "Merge and Score", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reddit Search": {
+      "main": [
+        [{ "node": "Merge and Score", "type": "main", "index": 0 }]
+      ]
+    },
+    "Perplexity Search": {
+      "main": [
+        [{ "node": "Merge and Score", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge and Score": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" },
+    { "name": "Per-Department" }
+  ]
+}

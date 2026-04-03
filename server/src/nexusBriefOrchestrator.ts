@@ -13,7 +13,14 @@ import {
   nexusBriefWebSources,
 } from '../../shared/schemas/schema';
 import { gatherWebIntelligence, type WebSource } from './nexusWebIntelligence';
-import { gatherWebIntelligenceHybrid, isN8NConfigured } from './n8nBridge';
+import {
+  gatherWebIntelligenceHybrid,
+  isN8NConfigured,
+  triggerPerDeptResearch,
+  triggerDeptGapResearch,
+  mergeWebIntelligence,
+  type DeptResearchContext,
+} from './n8nBridge';
 import {
   runAllDepartmentAgents,
   runAIDevTranslation,
@@ -313,6 +320,7 @@ export async function runNexusOrchestrator(opts: {
             redditScore: s.redditScore ?? null,
             contributorCount: s.contributorCount ?? null,
             rawPayload: s.rawPayload,
+            department: s.department ?? null,
           }))
         );
       } catch {
@@ -325,6 +333,97 @@ export async function runNexusOrchestrator(opts: {
       topSources: [],
     });
 
+    // ── Step 3.5: Per-department deep research ──────────────────────────────
+    let perDeptWebIntelligence: Map<string, WebIntelligenceResult> | undefined;
+    try {
+      if (process.env.NEXUS_DEPT_RESEARCH_ENABLED !== 'false') {
+        sseWrite(sseRes, 'dept_research_start', { departments: departments.filter(d => d !== 'ai-dev'), total: departments.filter(d => d !== 'ai-dev').length });
+
+        // Load team member data to build dept contexts
+        const nexusConfigForDept = await loadNexusConfig();
+        const deptContexts: DeptResearchContext[] = departments
+          .filter(d => d !== 'ai-dev')
+          .map(dept => {
+            const team = nexusConfigForDept.teamMembers?.filter(m => m.department === dept) ?? [];
+            const allSkills = team.flatMap(m => m.skills ?? []);
+            const allExpertise = team.flatMap(m => m.domainExpertise ?? []);
+            const deptInfo = getDepartmentInfo(dept as DepartmentId);
+            return {
+              department: dept,
+              departmentRole: deptInfo.hebrewName ?? dept,
+              skills: [...new Set(allSkills)].slice(0, 10),
+              domainExpertise: [...new Set(allExpertise)].slice(0, 5),
+            };
+          });
+
+        // Run per-dept research in parallel with concurrency limit
+        const { perDeptSources, gapDepartments, totalSourcesFound } = await triggerPerDeptResearch(
+          briefId,
+          ideaPrompt,
+          deptContexts,
+        );
+
+        // Emit per-dept progress events
+        for (const [dept, sources] of perDeptSources) {
+          sseWrite(sseRes, 'dept_research_found', {
+            department: dept,
+            sourceCount: sources.length,
+            topSource: sources[0]?.title?.slice(0, 60) ?? null,
+          });
+        }
+
+        // Gap analysis: second pass for departments with insufficient sources
+        if (gapDepartments.length > 0) {
+          sseWrite(sseRes, 'dept_research_gap', { gaps: gapDepartments, count: gapDepartments.length });
+
+          const gapContexts = deptContexts.filter(c => gapDepartments.includes(c.department));
+          const gapSources = await triggerDeptGapResearch(briefId, ideaPrompt, gapContexts);
+
+          // Merge gap results into perDeptSources
+          for (const [dept, sources] of gapSources) {
+            const existing = perDeptSources.get(dept) ?? [];
+            perDeptSources.set(dept, [...existing, ...sources]);
+          }
+        }
+
+        // Merge generic + per-dept sources
+        perDeptWebIntelligence = mergeWebIntelligence(webIntelligence, perDeptSources);
+
+        // Save per-dept sources to DB
+        for (const [dept, sources] of perDeptSources) {
+          if (sources.length === 0) continue;
+          try {
+            await db.insert(nexusBriefWebSources).values(
+              sources.map(s => ({
+                briefId,
+                sourceType: s.sourceType,
+                url: s.url,
+                title: s.title,
+                snippet: s.snippet,
+                trustScore: s.trustScore,
+                githubStars: s.githubStars ?? null,
+                redditScore: s.redditScore ?? null,
+                contributorCount: s.contributorCount ?? null,
+                rawPayload: s.rawPayload,
+                department: dept,
+              }))
+            );
+          } catch { /* non-fatal */ }
+        }
+
+        sseWrite(sseRes, 'dept_research_done', {
+          totalSources: totalSourcesFound,
+          gapsResolved: gapDepartments.length,
+          deptCount: perDeptSources.size,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[NexusOrchestrator] Per-dept research failed (non-fatal):', msg);
+      sseWrite(sseRes, 'dept_research_error', { error: msg });
+      perDeptWebIntelligence = undefined;
+    }
+
     // ── Step 4: Department agents ────────────────────────────────────────────
     const departmentResults = await runAllDepartmentAgents({
       departments,
@@ -336,6 +435,7 @@ export async function runNexusOrchestrator(opts: {
       contextNotes,
       targetPlatforms,
       briefId,
+      perDeptWebIntelligence,
       onDepartmentStart: (department, hebrewName) => {
         sseWrite(sseRes, 'department_start', { department, hebrewName });
       },

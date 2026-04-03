@@ -53,7 +53,7 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs =
 }
 
 // ── GitHub Trending / Search ───────────────────────────────────────────────────
-async function fetchGitHubSources(query: string): Promise<WebSource[]> {
+export async function fetchGitHubSources(query: string): Promise<WebSource[]> {
   try {
     const token = process.env.GITHUB_TOKEN;
     const headers: Record<string, string> = {
@@ -111,7 +111,7 @@ async function fetchGitHubSources(query: string): Promise<WebSource[]> {
 }
 
 // ── Reddit Posts (general search) ─────────────────────────────────────────────
-async function fetchRedditSources(query: string, subreddit?: string): Promise<WebSource[]> {
+export async function fetchRedditSources(query: string, subreddit?: string): Promise<WebSource[]> {
   try {
     const encoded = encodeURIComponent(query);
     const base = subreddit
@@ -368,7 +368,7 @@ async function fetchRssSources(
 }
 
 // ── Perplexity Context ─────────────────────────────────────────────────────────
-async function fetchPerplexitySingle(query: string, focusPrompt: string): Promise<WebSource | null> {
+export async function fetchPerplexitySingle(query: string, focusPrompt: string): Promise<WebSource | null> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) return null;
 

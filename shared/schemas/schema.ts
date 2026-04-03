@@ -1231,6 +1231,7 @@ export const devTasks = pgTable('dev_tasks', {
   targetFile: varchar('target_file', { length: 500 }),
   estimatedTokens: integer('estimated_tokens').default(0),
   dependsOn: jsonb('depends_on').$type<string[]>().default([]),
+  environment: varchar('environment', { length: 16 }).default('admin'),
   aiGenerated: boolean('ai_generated').notNull().default(false),
   cursorPromptSnippet: text('cursor_prompt_snippet'),
   verificationSteps: jsonb('verification_steps').$type<string[]>().default([]),
@@ -1518,6 +1519,7 @@ export const nexusBriefWebSources = pgTable('nexus_brief_web_sources', {
   redditScore: integer('reddit_score'),
   contributorCount: integer('contributor_count'),
   rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
+  department: varchar('department', { length: 32 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -1588,6 +1590,7 @@ export const nexusExtractedTasks = pgTable('nexus_extracted_tasks', {
   category: varchar('category', { length: 32 }).default('feature'),
   skillTags: text('skill_tags').array().notNull().default([]),
   sourceDepartment: varchar('source_department', { length: 32 }),
+  environment: varchar('environment', { length: 16 }).default('admin'),
   accepted: boolean('accepted').notNull().default(true),
   devTaskId: uuid('dev_task_id'),
   sprintId: uuid('sprint_id'),

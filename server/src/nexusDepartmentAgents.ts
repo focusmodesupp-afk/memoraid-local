@@ -708,10 +708,11 @@ export async function runAllDepartmentAgents(opts: {
   contextNotes?: string | null;
   targetPlatforms?: string[] | null;
   briefId?: string;
+  perDeptWebIntelligence?: Map<string, WebIntelligenceResult>;
   onDepartmentStart?: (department: DepartmentId, hebrewName: string) => void;
   onDepartmentComplete?: (result: DepartmentResult) => void;
 }): Promise<DepartmentResult[]> {
-  const { departments, onDepartmentStart, onDepartmentComplete, ...agentOpts } = opts;
+  const { departments, onDepartmentStart, onDepartmentComplete, perDeptWebIntelligence, ...agentOpts } = opts;
 
   // Load all DB config ONCE before running all agents
   const nexusConfig = await loadNexusConfig();
@@ -723,7 +724,9 @@ export async function runAllDepartmentAgents(opts: {
     onDepartmentStart?.(department, nexusConfig.deptSettings[department]?.isActive !== false
       ? (DEPARTMENT_CONFIGS[department]?.hebrewName ?? department)
       : department);
-    const result = await runDepartmentAgent({ ...agentOpts, department, nexusConfig });
+    // Use per-department web intelligence if available, otherwise fall back to generic
+    const deptWebIntel = perDeptWebIntelligence?.get(department) ?? agentOpts.webIntelligence;
+    const result = await runDepartmentAgent({ ...agentOpts, webIntelligence: deptWebIntel, department, nexusConfig });
     onDepartmentComplete?.(result);
     return result;
   });
