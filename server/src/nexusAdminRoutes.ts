@@ -490,6 +490,98 @@ nexusAdminRoutes.get('/nexus/briefs/:id/departments', requireAdmin, async (req, 
   }
 });
 
+// ── POST /nexus/briefs/:id/retry-department ──────────────────────────────────
+nexusAdminRoutes.post('/nexus/briefs/:id/retry-department', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { department, model } = req.body as { department: string; model: string };
+    if (!department || !model) return res.status(400).json({ error: 'department and model are required' });
+
+    const [brief] = await db.select().from(nexusBriefs).where(eq(nexusBriefs.id, id));
+    if (!brief) return res.status(404).json({ error: 'Brief not found' });
+
+    const admin = (req as unknown as { admin: { id: string } }).admin;
+
+    // Load web intelligence for this dept from DB
+    const deptSources = await db
+      .select()
+      .from(nexusBriefWebSources)
+      .where(eq(nexusBriefWebSources.briefId, id));
+    const webIntelligence = {
+      sources: deptSources.map((s) => ({
+        sourceType: s.sourceType as 'github' | 'reddit' | 'rss' | 'perplexity',
+        url: s.url ?? '',
+        title: s.title ?? '',
+        snippet: s.snippet ?? '',
+        trustScore: s.trustScore ?? 0,
+        githubStars: s.githubStars ?? undefined,
+        redditScore: s.redditScore ?? undefined,
+        contributorCount: s.contributorCount ?? undefined,
+        department: s.department ?? undefined,
+        rawPayload: (s.rawPayload ?? {}) as Record<string, unknown>,
+      })),
+      synthesizedContext: '',
+    };
+
+    // Run single department agent
+    const { runDepartmentAgent, loadNexusConfig } = await import('./nexusDepartmentAgents');
+    const { gatherProjectData } = await import('./projectDataGatherer');
+    const nexusConfig = await loadNexusConfig();
+    const codebaseContext = await gatherProjectData('quick', 'all');
+
+    const result = await runDepartmentAgent({
+      department: department as any,
+      ideaPrompt: brief.ideaPrompt,
+      webIntelligence,
+      codebaseContext,
+      models: [model as any],
+      adminUserId: admin.id,
+      contextNotes: brief.contextNotes,
+      targetPlatforms: brief.targetPlatforms,
+      nexusConfig,
+      briefId: id,
+    });
+
+    // Update the department row in DB
+    await db
+      .update(nexusBriefDepartments)
+      .set({
+        status: result.error ? 'error' : 'completed',
+        output: result.output,
+        promptSnapshot: result.promptSnapshot ?? null,
+        modelUsed: result.modelUsed,
+        tokensUsed: result.tokensUsed,
+        costUsd: String(result.costUsd.toFixed(6)),
+        errorMessage: result.error ?? null,
+        completedAt: new Date(),
+      })
+      .where(
+        sql`brief_id = ${id} AND department = ${department}`
+      );
+
+    // Update brief total cost and tokens
+    await db.execute(sql`
+      UPDATE nexus_briefs SET
+        total_cost_usd = (SELECT COALESCE(SUM(cost_usd::numeric), 0)::text FROM nexus_brief_departments WHERE brief_id = ${id} AND status = 'completed'),
+        total_tokens_used = (SELECT COALESCE(SUM(tokens_used), 0) FROM nexus_brief_departments WHERE brief_id = ${id} AND status = 'completed'),
+        updated_at = NOW()
+      WHERE id = ${id}
+    `);
+
+    res.json({
+      ok: true,
+      department,
+      model: result.modelUsed,
+      tokensUsed: result.tokensUsed,
+      costUsd: result.costUsd,
+      error: result.error ?? null,
+    });
+  } catch (err) {
+    console.error('[nexus] retry-department error:', err);
+    res.status(500).json({ error: 'Failed to retry department' });
+  }
+});
+
 // ── GET /nexus/briefs/:id/sources ─────────────────────────────────────────────
 nexusAdminRoutes.get('/nexus/briefs/:id/sources', requireAdmin, async (req, res) => {
   try {

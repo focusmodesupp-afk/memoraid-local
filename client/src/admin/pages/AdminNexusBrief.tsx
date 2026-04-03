@@ -278,6 +278,9 @@ export default function AdminNexusBrief() {
   const [deptResearchSources, setDeptResearchSources] = useState(0);
   const [deptResearchGaps, setDeptResearchGaps] = useState<string[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [retryDept, setRetryDept] = useState<string | null>(null);
+  const [retryModel, setRetryModel] = useState('claude-sonnet-4-6');
+  const [retryLoading, setRetryLoading] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   // ── Context notes + platform state ───────────────────────────────────────
@@ -636,6 +639,30 @@ export default function AdminNexusBrief() {
         esRef.current?.close();
         void loadBrief();
         break;
+    }
+  };
+
+  // ── Retry single department ────────────────────────────────────────────────
+  const handleRetryDept = async () => {
+    if (!retryDept || !retryModel) return;
+    setRetryLoading(true);
+    try {
+      const res = await apiFetch(`/api/admin/nexus/briefs/${briefId}/retry-department`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ department: retryDept, model: retryModel }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setRetryDept(null);
+        void loadBrief(); // Reload to show updated department result
+      } else {
+        alert(data.error || 'Retry failed');
+      }
+    } catch (err) {
+      alert('Retry failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRetryLoading(false);
     }
   };
 
@@ -2053,8 +2080,23 @@ export default function AdminNexusBrief() {
                             )}
                           </div>
                           <div className="shrink-0 text-left">
-                            <p className="text-xs font-mono text-violet-400">{d.modelUsed?.replace('claude-', '').replace('-20251001', '').slice(0, 16)}</p>
-                            <p className="text-xs text-slate-500 font-mono">{d.tokensUsed?.toLocaleString()} tok</p>
+                            {d.errorMessage ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRetryDept(d.department);
+                                }}
+                                className="px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors flex items-center gap-1"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                {tt('נסה שוב')}
+                              </button>
+                            ) : (
+                              <>
+                                <p className="text-xs font-mono text-violet-400">{d.modelUsed?.replace('claude-', '').replace('-20251001', '').slice(0, 16)}</p>
+                                <p className="text-xs text-slate-500 font-mono">{d.tokensUsed?.toLocaleString()} tok</p>
+                              </>
+                            )}
                           </div>
                         </button>
                       );
@@ -2516,6 +2558,53 @@ export default function AdminNexusBrief() {
               >
                 {actionLoading === 'reject' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {tt('דחה ניירת')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════
+          RETRY DEPARTMENT DIALOG
+          ════════════════════════════════════════════════════════ */}
+      {retryDept && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => !retryLoading && setRetryDept(null)}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-600 p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-100 mb-1 text-right">
+              {tt('הרצה חוזרת למחלקה')}
+            </h3>
+            <p className="text-sm text-slate-400 mb-4 text-right">
+              {ALL_DEPARTMENTS.find(d => d.id === retryDept)?.emoji} {ALL_DEPARTMENTS.find(d => d.id === retryDept)?.hebrewName ?? retryDept}
+            </p>
+            <label className="block text-sm font-semibold text-slate-300 mb-2 text-right">{tt('בחר מודל AI')}</label>
+            <select
+              value={retryModel}
+              onChange={(e) => setRetryModel(e.target.value)}
+              className="w-full p-3 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 mb-4 text-right"
+              dir="ltr"
+            >
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-3.1-pro">Gemini 3.1 Pro</option>
+            </select>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setRetryDept(null)}
+                disabled={retryLoading}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                {tt('ביטול')}
+              </button>
+              <button
+                onClick={handleRetryDept}
+                disabled={retryLoading}
+                className="px-5 py-2 text-sm font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors flex items-center gap-2"
+              >
+                {retryLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                {retryLoading ? tt('מריץ...') : tt('הרץ שוב')}
               </button>
             </div>
           </div>
