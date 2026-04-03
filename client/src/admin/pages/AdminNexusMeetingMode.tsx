@@ -10,7 +10,7 @@
  * Each round shows participants, progress, results, and synthesis.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Loader2, CheckCircle, XCircle, AlertCircle, Play, RotateCcw, Zap,
   ChevronDown, ChevronUp, Users, Crown, Briefcase, Code2,
@@ -83,7 +83,7 @@ const ROUND_META = [
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: Props) {
-  // Round states
+  // Round states — detect completed rounds from DB
   const [activeRound, setActiveRound] = useState<number>(brief.currentRound ?? 0);
   const [roundStatus, setRoundStatus] = useState<Record<number, RoundStatus>>({
     1: brief.round1Synthesis ? 'completed' : 'idle',
@@ -92,7 +92,15 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
   });
   const [employees, setEmployees] = useState<Record<number, EmployeeLiveResult[]>>({});
   const [roundResults, setRoundResults] = useState<Record<number, RoundResult | null>>({});
-  const [expandedRound, setExpandedRound] = useState<number | null>(null);
+
+  // Auto-expand the round that needs attention
+  const getActiveRound = () => {
+    if (brief.currentRound && brief.currentRound >= 1 && !brief.round1Synthesis) return 1;
+    if (brief.round1Synthesis && !brief.round2Synthesis) return 2;
+    if (brief.round2Synthesis && !brief.round3Synthesis) return 3;
+    return null;
+  };
+  const [expandedRound, setExpandedRound] = useState<number | null>(getActiveRound());
   const [synthesizing, setSynthesizing] = useState<number | null>(null);
   const [retryEmployee, setRetryEmployee] = useState<{ roundId: string; name: string; roundNum: number } | null>(null);
   const [retryModel, setRetryModel] = useState('claude-sonnet-4-6');
@@ -100,6 +108,30 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
   const [liveCost, setLiveCost] = useState<Record<number, number>>({});
   const [liveTokens, setLiveTokens] = useState<Record<number, number>>({});
   const esRef = useRef<EventSource | null>(null);
+
+  // ── Auto-detect completed rounds from DB on mount ────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await apiFetch<{ rounds: Array<{ roundNumber: number; status: string; completedCount: number; participantCount: number }> }>(`/admin/nexus/briefs/${briefId}/rounds`);
+        if (data.rounds?.length) {
+          const newStatus: Record<number, RoundStatus> = { ...roundStatus };
+          for (const r of data.rounds) {
+            if (r.status === 'completed' && !brief[`round${r.roundNumber}Synthesis` as keyof typeof brief]) {
+              newStatus[r.roundNumber] = 'completed'; // completed but not synthesized
+            }
+          }
+          setRoundStatus(newStatus);
+          // Auto-expand the first round needing action
+          const needsAction = data.rounds.find(r => r.status === 'completed' && !brief[`round${r.roundNumber}Synthesis` as keyof typeof brief]);
+          if (needsAction) {
+            setExpandedRound(needsAction.roundNumber);
+            loadRoundResults(needsAction.roundNumber);
+          }
+        }
+      } catch { /* non-fatal */ }
+    })();
+  }, [briefId]);
 
   // ── Launch a round ─────────────────────────────────────────────────────────
 
@@ -286,6 +318,63 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
         <Users className="w-6 h-6 text-indigo-400" />
         <h2 className="text-xl font-bold text-slate-100">{tt('מצב ישיבות מחלקה')}</h2>
       </div>
+
+      {/* Action banner — tell admin what to do next */}
+      {(() => {
+        const r1Done = roundStatus[1] === 'completed';
+        const r1Synth = !!brief.round1Synthesis;
+        const r2Done = roundStatus[2] === 'completed';
+        const r2Synth = !!brief.round2Synthesis;
+        const r3Done = roundStatus[3] === 'completed';
+
+        if (r1Done && !r1Synth) return (
+          <div className="p-4 rounded-xl border-2 border-amber-500/60 bg-amber-500/10 mb-4 flex items-center gap-3">
+            <Zap className="w-6 h-6 text-amber-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-200">{tt('Round 1 הושלם — נדרש איחוד מחקרים')}</p>
+              <p className="text-xs text-amber-300/70 mt-0.5">{tt('בדוק את תוצאות ההנהלה הבכירה, ולחץ "איחוד מחקרים" להמשך ל-Round 2')}</p>
+            </div>
+            <button onClick={() => { setExpandedRound(1); }} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-semibold transition-colors">
+              {tt('פתח Round 1')}
+            </button>
+          </div>
+        );
+        if (r1Synth && roundStatus[2] === 'idle') return (
+          <div className="p-4 rounded-xl border-2 border-blue-500/60 bg-blue-500/10 mb-4 flex items-center gap-3">
+            <Briefcase className="w-6 h-6 text-blue-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-blue-200">{tt('Round 1 אוחד — מוכן ל-Round 2: ישיבת מנהלי צוותים')}</p>
+              <p className="text-xs text-blue-300/70 mt-0.5">{tt('לחץ על Round 2 והפעל מחקר מנהלי צוותים')}</p>
+            </div>
+            <button onClick={() => setExpandedRound(2)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-semibold transition-colors">
+              {tt('פתח Round 2')}
+            </button>
+          </div>
+        );
+        if (r2Done && !r2Synth) return (
+          <div className="p-4 rounded-xl border-2 border-amber-500/60 bg-amber-500/10 mb-4 flex items-center gap-3">
+            <Zap className="w-6 h-6 text-amber-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-200">{tt('Round 2 הושלם — נדרש איחוד אפיונים')}</p>
+            </div>
+            <button onClick={() => setExpandedRound(2)} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-semibold transition-colors">
+              {tt('פתח Round 2')}
+            </button>
+          </div>
+        );
+        if (r2Synth && roundStatus[3] === 'idle') return (
+          <div className="p-4 rounded-xl border-2 border-green-500/60 bg-green-500/10 mb-4 flex items-center gap-3">
+            <Code2 className="w-6 h-6 text-green-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-green-200">{tt('Round 2 אוחד — מוכן ל-Round 3: מחקר עובדים פרטני')}</p>
+            </div>
+            <button onClick={() => setExpandedRound(3)} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-semibold transition-colors">
+              {tt('פתח Round 3')}
+            </button>
+          </div>
+        );
+        return null;
+      })()}
 
       {ROUND_META.map((meta) => {
         const status = roundStatus[meta.num] ?? 'idle';
