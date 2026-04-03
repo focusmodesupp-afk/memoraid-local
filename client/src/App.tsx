@@ -694,6 +694,13 @@ function App() {
 
           {/* Admin – מרכז ניהול */}
           <Route path="/admin/login" component={AdminShell} />
+          <Route path="/admin/users-hub" component={AdminShell} />
+          <Route path="/admin/content-hub" component={AdminShell} />
+          <Route path="/admin/sales-hub" component={AdminShell} />
+          <Route path="/admin/monitoring-hub" component={AdminShell} />
+          <Route path="/admin/qa-hub" component={AdminShell} />
+          <Route path="/admin/dev-hub" component={AdminShell} />
+          <Route path="/admin/settings-hub" component={AdminShell} />
           <Route path="/admin/data-center" component={AdminShell} />
           <Route path="/admin/communication" component={AdminShell} />
           <Route path="/admin/qa/control" component={AdminShell} />
@@ -703,7 +710,9 @@ function App() {
           <Route path="/admin/sales/reports" component={AdminShell} />
           <Route path="/admin/content/cms" component={AdminShell} />
           <Route path="/admin/content/library" component={AdminShell} />
+          <Route path="/admin/ai-hub" component={AdminShell} />
           <Route path="/admin/ai/project-analyze" component={AdminShell} />
+          <Route path="/admin/communication-hub" component={AdminShell} />
           <Route path="/admin/ai" component={AdminShell} />
           <Route path="/admin/qa/runs" component={AdminShell} />
           <Route path="/admin/qa/data-quality" component={AdminShell} />
@@ -737,6 +746,9 @@ function App() {
           <Route path="/admin/plans/coupons" component={AdminShell} />
           <Route path="/admin/plans/promotions" component={AdminShell} />
           <Route path="/admin/plans" component={AdminShell} />
+          <Route path="/admin/nexus/ideas" component={AdminShell} />
+          <Route path="/admin/nexus/team/:id" component={AdminShell} />
+          <Route path="/admin/nexus/departments/:dept/knowledge" component={AdminShell} />
           <Route path="/admin/nexus/settings" component={AdminShell} />
           <Route path="/admin/nexus/briefs/:id" component={AdminShell} />
           <Route path="/admin/nexus" component={AdminShell} />

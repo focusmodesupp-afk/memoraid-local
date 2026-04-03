@@ -1581,6 +1581,57 @@ export const nexusBriefRoundResults = pgTable('nexus_brief_round_results', {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Nexus Idea Bank — ideas from briefs, admin, and virtual employees
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const nexusIdeas = pgTable('nexus_ideas', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  title: varchar('title', { length: 500 }).notNull(),
+  description: text('description'),
+  category: varchar('category', { length: 32 }).default('feature'),
+
+  sourceType: varchar('source_type', { length: 16 }).notNull(),
+  sourceBriefId: uuid('source_brief_id').references(() => nexusBriefs.id, { onDelete: 'set null' }),
+  sourceDepartment: varchar('source_department', { length: 32 }),
+  sourceEmployeeName: varchar('source_employee_name', { length: 128 }),
+  sourceRound: integer('source_round'),
+
+  priority: varchar('priority', { length: 16 }).default('medium'),
+  score: integer('score').default(0),
+  upvotes: integer('upvotes').default(0),
+  downvotes: integer('downvotes').default(0),
+  votedBy: jsonb('voted_by').$type<Array<{ adminId: string; vote: 'up' | 'down'; reason?: string; timestamp: string }>>().default([]),
+
+  ceoRecommendation: varchar('ceo_recommendation', { length: 32 }),
+  executiveNotes: text('executive_notes'),
+
+  status: varchar('status', { length: 16 }).default('new'),
+  targetQuarter: varchar('target_quarter', { length: 8 }),
+  estimatedHours: integer('estimated_hours'),
+  estimatedCost: varchar('estimated_cost', { length: 16 }),
+  affectedEnvironment: varchar('affected_environment', { length: 16 }),
+  affectedFiles: text('affected_files').array().default([]),
+  tags: text('tags').array().default([]),
+
+  sprintId: uuid('sprint_id'),
+  briefIdCreatedFrom: uuid('brief_id_created_from'),
+  relatedIdeaIds: uuid('related_idea_ids').array().default([]),
+
+  createdBy: uuid('created_by').references(() => adminUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const nexusIdeaComments = pgTable('nexus_idea_comments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ideaId: uuid('idea_id').notNull().references(() => nexusIdeas.id, { onDelete: 'cascade' }),
+  authorType: varchar('author_type', { length: 16 }).notNull(),
+  authorName: varchar('author_name', { length: 128 }),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Nexus Layer 2+3+4: Skills, Rules, Templates, Dept Settings, Extracted Tasks
 // ──────────────────────────────────────────────────────────────────────────────
 

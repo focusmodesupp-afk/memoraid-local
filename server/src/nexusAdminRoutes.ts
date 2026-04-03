@@ -25,7 +25,8 @@ import { gatherProjectData } from './projectDataGatherer';
 import { processN8NResults, isN8NConfigured, type N8NResultPayload } from './n8nBridge';
 import { generateQuestionsForBrief, autoAnswerQuestions, getAllBriefQuestions } from './questionDiscovery';
 import { runMeetingRound, synthesizeRound } from './nexusRoundOrchestrator';
-import { nexusBriefRounds, nexusBriefRoundResults } from '../../shared/schemas/schema';
+import { nexusBriefRounds, nexusBriefRoundResults, nexusIdeas, nexusIdeaComments } from '../../shared/schemas/schema';
+import { extractIdeasFromBrief } from './nexusIdeaExtractor';
 
 // ── File upload (in-memory, no disk) ──────────────────────────────────────────
 const upload = multer({
@@ -833,6 +834,170 @@ nexusAdminRoutes.post('/nexus/briefs/:id/rounds/:roundId/retry-employee', requir
   } catch (err) {
     console.error('[nexus] retry-employee error:', err);
     res.status(500).json({ error: 'Failed to retry employee' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEXUS Idea Bank
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── GET /nexus/ideas — List all ideas ────────────────────────────────────────
+nexusAdminRoutes.get('/nexus/ideas', requireAdmin, async (req, res) => {
+  try {
+    const ideas = await db.select().from(nexusIdeas).orderBy(desc(nexusIdeas.score), desc(nexusIdeas.createdAt));
+    res.json({ ideas });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get ideas' });
+  }
+});
+
+// ── GET /nexus/ideas/:id — Single idea with comments ────────────────────────
+nexusAdminRoutes.get('/nexus/ideas/:id', requireAdmin, async (req, res) => {
+  try {
+    const [idea] = await db.select().from(nexusIdeas).where(eq(nexusIdeas.id, req.params.id));
+    if (!idea) return res.status(404).json({ error: 'Idea not found' });
+    const comments = await db.select().from(nexusIdeaComments)
+      .where(eq(nexusIdeaComments.ideaId, req.params.id))
+      .orderBy(nexusIdeaComments.createdAt);
+    res.json({ idea, comments });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get idea' });
+  }
+});
+
+// ── POST /nexus/ideas — Create idea manually ─────────────────────────────────
+nexusAdminRoutes.post('/nexus/ideas', requireAdmin, async (req, res) => {
+  try {
+    const admin = await getAdminFromRequest(req);
+    const { title, description, category, priority, estimatedHours, affectedEnvironment, tags } = req.body;
+    if (!title) return res.status(400).json({ error: 'title is required' });
+
+    const [idea] = await db.insert(nexusIdeas).values({
+      title,
+      description: description ?? '',
+      category: category ?? 'feature',
+      sourceType: 'admin',
+      priority: priority ?? 'medium',
+      estimatedHours: estimatedHours ?? null,
+      affectedEnvironment: affectedEnvironment ?? null,
+      tags: tags ?? [],
+      createdBy: admin?.id ?? null,
+      status: 'new',
+    }).returning();
+
+    res.json({ idea });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create idea' });
+  }
+});
+
+// ── PATCH /nexus/ideas/:id — Update idea ─────────────────────────────────────
+nexusAdminRoutes.patch('/nexus/ideas/:id', requireAdmin, async (req, res) => {
+  try {
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    const allowed = ['title', 'description', 'category', 'priority', 'status', 'targetQuarter',
+      'estimatedHours', 'estimatedCost', 'affectedEnvironment', 'affectedFiles', 'tags',
+      'ceoRecommendation', 'executiveNotes'];
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    const [updated] = await db.update(nexusIdeas).set(updates as any)
+      .where(eq(nexusIdeas.id, req.params.id)).returning();
+    if (!updated) return res.status(404).json({ error: 'Idea not found' });
+    res.json({ idea: updated });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update idea' });
+  }
+});
+
+// ── DELETE /nexus/ideas/:id ──────────────────────────────────────────────────
+nexusAdminRoutes.delete('/nexus/ideas/:id', requireAdmin, async (req, res) => {
+  try {
+    await db.delete(nexusIdeas).where(eq(nexusIdeas.id, req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete idea' });
+  }
+});
+
+// ── POST /nexus/ideas/:id/vote — Vote on idea ───────────────────────────────
+nexusAdminRoutes.post('/nexus/ideas/:id/vote', requireAdmin, async (req, res) => {
+  try {
+    const admin = await getAdminFromRequest(req);
+    const { vote, reason } = req.body as { vote: 'up' | 'down'; reason?: string };
+    if (!vote || !['up', 'down'].includes(vote)) return res.status(400).json({ error: 'vote must be up or down' });
+
+    const [idea] = await db.select().from(nexusIdeas).where(eq(nexusIdeas.id, req.params.id));
+    if (!idea) return res.status(404).json({ error: 'Idea not found' });
+
+    // Remove previous vote by this admin if exists
+    const existingVotes = (idea.votedBy ?? []) as Array<{ adminId: string; vote: string; reason?: string; timestamp: string }>;
+    const filtered = existingVotes.filter(v => v.adminId !== admin?.id);
+    filtered.push({ adminId: admin?.id ?? 'unknown', vote, reason, timestamp: new Date().toISOString() });
+
+    const upvotes = filtered.filter(v => v.vote === 'up').length;
+    const downvotes = filtered.filter(v => v.vote === 'down').length;
+    const priorityWeight = idea.priority === 'critical' ? 10 : idea.priority === 'high' ? 5 : idea.priority === 'medium' ? 2 : 0;
+    const score = upvotes - downvotes + priorityWeight;
+
+    await db.update(nexusIdeas).set({
+      votedBy: filtered as any,
+      upvotes,
+      downvotes,
+      score,
+      updatedAt: new Date(),
+    }).where(eq(nexusIdeas.id, req.params.id));
+
+    res.json({ ok: true, score, upvotes, downvotes });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to vote' });
+  }
+});
+
+// ── POST /nexus/ideas/:id/comment — Add comment ─────────────────────────────
+nexusAdminRoutes.post('/nexus/ideas/:id/comment', requireAdmin, async (req, res) => {
+  try {
+    const admin = await getAdminFromRequest(req);
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'content is required' });
+
+    const [comment] = await db.insert(nexusIdeaComments).values({
+      ideaId: req.params.id,
+      authorType: 'admin',
+      authorName: admin?.fullName ?? admin?.email ?? 'Admin',
+      content,
+    }).returning();
+
+    res.json({ comment });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add comment' });
+  }
+});
+
+// ── POST /nexus/ideas/:id/defer — Defer to future quarter ───────────────────
+nexusAdminRoutes.post('/nexus/ideas/:id/defer', requireAdmin, async (req, res) => {
+  try {
+    const { targetQuarter } = req.body;
+    await db.update(nexusIdeas).set({
+      status: 'deferred',
+      targetQuarter: targetQuarter ?? null,
+      updatedAt: new Date(),
+    }).where(eq(nexusIdeas.id, req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to defer idea' });
+  }
+});
+
+// ── POST /nexus/briefs/:id/extract-ideas — Extract ideas from brief ─────────
+nexusAdminRoutes.post('/nexus/briefs/:id/extract-ideas', requireAdmin, async (req, res) => {
+  try {
+    const admin = await getAdminFromRequest(req);
+    const result = await extractIdeasFromBrief(req.params.id, admin?.id);
+    res.json({ ok: true, extracted: result.ideas.length, saved: result.saved });
+  } catch (err) {
+    console.error('[nexus] extract-ideas error:', err);
+    res.status(500).json({ error: 'Failed to extract ideas' });
   }
 });
 

@@ -879,6 +879,51 @@ const startServer = (port: number) => {
     await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS team_member_id UUID`);
     await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS round_number INTEGER`);
 
+    // Patch 0044: NEXUS Idea Bank tables
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nexus_ideas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title VARCHAR(500) NOT NULL,
+        description TEXT,
+        category VARCHAR(32) DEFAULT 'feature',
+        source_type VARCHAR(16) NOT NULL,
+        source_brief_id UUID REFERENCES nexus_briefs(id) ON DELETE SET NULL,
+        source_department VARCHAR(32),
+        source_employee_name VARCHAR(128),
+        source_round INTEGER,
+        priority VARCHAR(16) DEFAULT 'medium',
+        score INTEGER DEFAULT 0,
+        upvotes INTEGER DEFAULT 0,
+        downvotes INTEGER DEFAULT 0,
+        voted_by JSONB DEFAULT '[]',
+        ceo_recommendation VARCHAR(32),
+        executive_notes TEXT,
+        status VARCHAR(16) DEFAULT 'new',
+        target_quarter VARCHAR(8),
+        estimated_hours INTEGER,
+        estimated_cost VARCHAR(16),
+        affected_environment VARCHAR(16),
+        affected_files TEXT[] DEFAULT '{}',
+        tags TEXT[] DEFAULT '{}',
+        sprint_id UUID,
+        brief_id_created_from UUID,
+        related_idea_ids UUID[] DEFAULT '{}',
+        created_by UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nexus_idea_comments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        idea_id UUID NOT NULL REFERENCES nexus_ideas(id) ON DELETE CASCADE,
+        author_type VARCHAR(16) NOT NULL,
+        author_name VARCHAR(128),
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `);
+
     console.log('DB: schema patches applied');
   } catch (err: any) {
     console.error('DB startup check FAILED:', err?.code || '', err?.message || err);

@@ -27,6 +27,18 @@ import AdminProjectAnalyze from './pages/AdminProjectAnalyze';
 import AdminNexusHub from './pages/AdminNexusHub';
 import AdminNexusBrief from './pages/AdminNexusBrief';
 import AdminNexusSettings from './pages/AdminNexusSettings';
+import AdminNexusIdeaBank from './pages/AdminNexusIdeaBank';
+import AdminDepartmentKnowledge from './pages/AdminDepartmentKnowledge';
+import AdminTeamMemberProfile from './pages/AdminTeamMemberProfile';
+import AdminAIHub from './pages/AdminAIHub';
+import AdminCommunicationHub from './pages/AdminCommunicationHub';
+import AdminUsersHub from './pages/AdminUsersHub';
+import AdminContentHub from './pages/AdminContentHub';
+import AdminSalesHub from './pages/AdminSalesHub';
+import AdminMonitoringHub from './pages/AdminMonitoringHub';
+import AdminQAHub from './pages/AdminQAHub';
+import AdminDevHub from './pages/AdminDevHub';
+import AdminSettingsHub from './pages/AdminSettingsHub';
 import AdminQARuns from './pages/AdminQARuns';
 import AdminQADataQuality from './pages/AdminQADataQuality';
 import AdminOKR from './pages/AdminOKR';
@@ -51,6 +63,8 @@ import AdminPipelines from './pages/AdminPipelines';
 import AdminPipelineDetail from './pages/AdminPipelineDetail';
 import AdminMedicalInsights from './pages/AdminMedicalInsights';
 import { AdminAuthProvider, useAdminAuth } from './AdminAuthContext';
+import { AdminI18nProvider, getStoredAdminLang } from './hooks/useAdminI18n';
+import { adminTranslations } from './adminTranslations';
 
 function AdminShellInner() {
   const [location, navigate] = useLocation();
@@ -73,16 +87,18 @@ function AdminShellInner() {
 
   if (location === '/admin/login') {
     return (
-      <AdminThemeProvider>
-        <AdminLogin />
-      </AdminThemeProvider>
+      <AdminI18nProvider>
+        <AdminThemeProvider>
+          <AdminLogin />
+        </AdminThemeProvider>
+      </AdminI18nProvider>
     );
   }
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-400">
-        טוען...
+        {adminTranslations[getStoredAdminLang()].commonLoading}
       </div>
     );
   }
@@ -92,9 +108,17 @@ function AdminShellInner() {
   }
 
   return (
-    <AdminThemeProvider>
-      <AdminLayout>
+    <AdminI18nProvider>
+      <AdminThemeProvider>
+        <AdminLayout>
         <Switch>
+        <Route path="/admin/users-hub" component={AdminUsersHub} />
+        <Route path="/admin/content-hub" component={AdminContentHub} />
+        <Route path="/admin/sales-hub" component={AdminSalesHub} />
+        <Route path="/admin/monitoring-hub" component={AdminMonitoringHub} />
+        <Route path="/admin/qa-hub" component={AdminQAHub} />
+        <Route path="/admin/dev-hub" component={AdminDevHub} />
+        <Route path="/admin/settings-hub" component={AdminSettingsHub} />
         <Route path="/admin/data-center" component={AdminDataCenter} />
         <Route path="/admin/communication" component={AdminCommunication} />
         <Route path="/admin/qa/control" component={AdminQAControl} />
@@ -104,8 +128,13 @@ function AdminShellInner() {
         <Route path="/admin/sales/reports" component={AdminSalesReports} />
         <Route path="/admin/content/cms" component={AdminCMS} />
         <Route path="/admin/content/library" component={AdminMediaLibrary} />
+        <Route path="/admin/ai-hub" component={AdminAIHub} />
         <Route path="/admin/ai/project-analyze" component={AdminProjectAnalyze} />
+        <Route path="/admin/communication-hub" component={AdminCommunicationHub} />
         <Route path="/admin/medical-insights" component={AdminMedicalInsights} />
+        <Route path="/admin/nexus/ideas" component={AdminNexusIdeaBank} />
+        <Route path="/admin/nexus/team/:id" component={AdminTeamMemberProfile} />
+        <Route path="/admin/nexus/departments/:dept/knowledge" component={AdminDepartmentKnowledge} />
         <Route path="/admin/nexus/settings" component={AdminNexusSettings} />
         <Route path="/admin/nexus/briefs/:id" component={AdminNexusBrief} />
         <Route path="/admin/nexus" component={AdminNexusHub} />
@@ -146,7 +175,8 @@ function AdminShellInner() {
         <Route component={AdminDashboard} />
         </Switch>
       </AdminLayout>
-    </AdminThemeProvider>
+      </AdminThemeProvider>
+    </AdminI18nProvider>
   );
 }
 
