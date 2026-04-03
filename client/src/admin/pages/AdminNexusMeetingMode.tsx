@@ -249,12 +249,12 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
     // First load round details to get roundId
     setSynthesizing(roundNumber);
     try {
-      const roundsResp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/rounds`);
+      const roundsResp = await apiFetch(`/admin/nexus/briefs/${briefId}/rounds`);
       const { rounds } = await roundsResp.json();
       const round = rounds?.find((r: any) => r.roundNumber === roundNumber);
       if (!round) throw new Error('Round not found');
 
-      const resp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/rounds/${round.id}/synthesize`, {
+      const resp = await apiFetch(`/admin/nexus/briefs/${briefId}/rounds/${round.id}/synthesize`, {
         method: 'POST',
       });
       const data = await resp.json();
@@ -276,7 +276,7 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
     if (!retryEmployee) return;
     setRetryLoading(true);
     try {
-      const resp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/rounds/${retryEmployee.roundId}/retry-employee`, {
+      const resp = await apiFetch(`/admin/nexus/briefs/${briefId}/rounds/${retryEmployee.roundId}/retry-employee`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ employeeName: retryEmployee.name, model: retryModel }),
@@ -299,12 +299,12 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
 
   const loadRoundResults = async (roundNumber: number) => {
     try {
-      const roundsResp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/rounds`);
+      const roundsResp = await apiFetch(`/admin/nexus/briefs/${briefId}/rounds`);
       const { rounds } = await roundsResp.json();
       const round = rounds?.find((r: any) => r.roundNumber === roundNumber);
       if (!round) return;
 
-      const detailResp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/rounds/${round.id}`);
+      const detailResp = await apiFetch(`/admin/nexus/briefs/${briefId}/rounds/${round.id}`);
       const detail = await detailResp.json();
       setRoundResults(prev => ({ ...prev, [roundNumber]: { ...detail.round, results: detail.results } }));
     } catch { /* non-fatal */ }
