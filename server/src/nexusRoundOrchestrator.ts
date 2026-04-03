@@ -125,15 +125,15 @@ async function runEmployeeAgent(opts: {
   });
 
   try {
-    // Auto-retry chain: try preferred model → claude → gpt-4o → gemini flash
+    // Auto-retry chain: try preferred model → openai → claude → gemini
     const FALLBACK_MODELS: AIProviderId[] = [
-      'claude-sonnet-4-6' as AIProviderId,
-      'gpt-4o' as AIProviderId,
-      'gemini-2.5-flash' as AIProviderId,
+      'openai',
+      'claude',
+      'gemini',
     ];
     const preferredModels: AIProviderId[] = opts.model
       ? [opts.model as AIProviderId, ...FALLBACK_MODELS.filter(m => m !== opts.model)]
-      : FALLBACK_MODELS;
+      : [...FALLBACK_MODELS];
 
     let result: any = null;
     let lastError = '';
