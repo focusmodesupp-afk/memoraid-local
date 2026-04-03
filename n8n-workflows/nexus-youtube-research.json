@@ -1,0 +1,97 @@
+{
+  "name": "NEXUS — YouTube Research",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-youtube-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { ideaPrompt, briefId } = $input.first().json.body;\n\n// Build YouTube search queries\nconst queries = [\n  `${ideaPrompt.slice(0, 80)} tutorial`,\n  `${ideaPrompt.slice(0, 80)} implementation guide`,\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
+      },
+      "id": "build-queries",
+      "name": "Build Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=3&order=relevance&q={{ encodeURIComponent($json.query) }}&key={{ $env.YOUTUBE_API_KEY }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "youtube-search",
+      "name": "YouTube API Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process YouTube search results\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const items = item.json?.items;\n  if (!items) continue;\n  \n  for (const video of items) {\n    const snippet = video.snippet;\n    if (!snippet) continue;\n    \n    const videoId = video.id?.videoId;\n    if (!videoId) continue;\n    \n    // YouTube trust score: 55-70 (moderate, as video content is less precise than code)\n    const trustScore = 60;\n    \n    allSources.push({\n      sourceType: 'youtube',\n      url: `https://www.youtube.com/watch?v=${videoId}`,\n      title: snippet.title?.slice(0, 500) || 'Untitled Video',\n      snippet: snippet.description?.slice(0, 300) || '',\n      trustScore,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'youtube_research',\n        channelTitle: snippet.channelTitle,\n        publishedAt: snippet.publishedAt,\n        videoId\n      }\n    });\n  }\n}\n\n// Deduplicate by videoId\nconst seen = new Set();\nconst unique = allSources.filter(s => {\n  const vid = s.rawPayload?.videoId;\n  if (seen.has(vid)) return false;\n  seen.add(vid);\n  return true;\n}).slice(0, 5);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    workflowName: 'nexus-youtube-research',\n    totalVideos: unique.length\n  }\n}}];"
+      },
+      "id": "process-results",
+      "name": "Process Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Build Search Queries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Search Queries": {
+      "main": [
+        [{ "node": "YouTube API Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "YouTube API Search": {
+      "main": [
+        [{ "node": "Process Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Results": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" }
+  ]
+}

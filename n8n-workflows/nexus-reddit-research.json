@@ -1,0 +1,105 @@
+{
+  "name": "NEXUS — Reddit Research",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reddit_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-reddit-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map departments to subreddits (matches NEXUS DEPT_REDDIT_SUBREDDITS)\nconst DEPT_SUBREDDITS = {\n  ceo: ['startups', 'Entrepreneur'],\n  cto: ['softwarearchitecture', 'node'],\n  cpo: ['ProductManagement', 'UXDesign'],\n  rd: ['MachineLearning', 'LocalLLaMA'],\n  design: ['web_design', 'UI_Design'],\n  product: ['ProductManagement', 'scrum'],\n  security: ['netsec', 'cybersecurity'],\n  legal: ['gdpr', 'legaladvice'],\n  marketing: ['marketing', 'SEO'],\n  finance: ['personalfinance', 'smallbusiness'],\n  hr: ['humanresources', 'remotework'],\n  cs: ['customerservice', 'helpdesk'],\n  sales: ['sales', 'SaaS'],\n  'ai-dev': ['MachineLearning', 'ClaudeAI']\n};\n\nconst { ideaPrompt, briefId, departments } = $input.first().json.body;\nconst depts = departments || Object.keys(DEPT_SUBREDDITS);\n\n// Collect unique subreddits for selected departments\nconst subreddits = new Set();\ndepts.forEach(d => {\n  (DEPT_SUBREDDITS[d] || []).forEach(s => subreddits.add(s));\n});\n\n// Limit to 6 subreddits to avoid rate limiting\nconst selected = [...subreddits].slice(0, 6);\n\nreturn selected.map(sub => ({\n  json: { subreddit: sub, query: ideaPrompt.slice(0, 100), briefId }\n}));"
+      },
+      "id": "map-subreddits",
+      "name": "Map Departments to Subreddits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.reddit.com/r/{{ $json.subreddit }}/search.json?q={{ encodeURIComponent($json.query) }}&sort=relevance&limit=3&t=year",
+        "options": {
+          "timeout": 10000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "NEXUS-Research-Bot/1.0"
+            }
+          ]
+        }
+      },
+      "id": "reddit-search",
+      "name": "Reddit Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process all Reddit results and calculate Trust Scores\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const data = item.json?.data;\n  if (!data?.children) continue;\n  \n  for (const child of data.children) {\n    const post = child.data;\n    if (!post || !post.title) continue;\n    \n    const score = post.score || 0;\n    const upvoteRatio = post.upvote_ratio || 0.5;\n    \n    // Trust Score: log10(score+1)*15 + upvote bonus\n    let trustScore = Math.round(Math.log10(score + 1) * 15);\n    if (upvoteRatio > 0.85) trustScore += 5;\n    trustScore = Math.min(100, Math.max(0, trustScore));\n    \n    allSources.push({\n      sourceType: 'reddit',\n      url: `https://reddit.com${post.permalink}`,\n      title: post.title.slice(0, 500),\n      snippet: (post.selftext || post.title).slice(0, 300),\n      trustScore,\n      redditScore: score,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'reddit_research',\n        subreddit: post.subreddit,\n        numComments: post.num_comments,\n        upvoteRatio,\n        createdUtc: post.created_utc\n      }\n    });\n  }\n}\n\n// Sort by trust score, deduplicate\nconst seen = new Set();\nconst unique = allSources\n  .sort((a, b) => b.trustScore - a.trustScore)\n  .filter(s => {\n    if (seen.has(s.url)) return false;\n    seen.add(s.url);\n    return true;\n  })\n  .slice(0, 10);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    workflowName: 'nexus-reddit-research',\n    totalPosts: allSources.length,\n    uniqueSources: unique.length\n  }\n}}];"
+      },
+      "id": "process-results",
+      "name": "Calculate Trust Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Map Departments to Subreddits", "type": "main", "index": 0 }]
+      ]
+    },
+    "Map Departments to Subreddits": {
+      "main": [
+        [{ "node": "Reddit Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reddit Search": {
+      "main": [
+        [{ "node": "Calculate Trust Scores", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Trust Scores": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" }
+  ]
+}

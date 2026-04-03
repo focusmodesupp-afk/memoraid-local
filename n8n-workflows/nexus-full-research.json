@@ -1,0 +1,164 @@
+{
+  "name": "NEXUS — Full Research (Orchestrator)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "full_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-full-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through the NEXUS payload to sub-workflows\nconst payload = $input.first().json.body;\nreturn [{ json: payload }];"
+      },
+      "id": "prepare-payload",
+      "name": "Prepare Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/github_research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "call-github",
+      "name": "GitHub Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/reddit_research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "call-reddit",
+      "name": "Reddit Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/youtube_research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "call-youtube",
+      "name": "YouTube Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 500],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/competitive_analysis",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "call-competitive",
+      "name": "Competitive Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 700],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge results from all 4 research workflows\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const sources = item.json?.sources;\n  if (Array.isArray(sources)) {\n    allSources.push(...sources);\n  }\n}\n\n// Sort by trust score, deduplicate by URL\nconst seen = new Set();\nconst merged = allSources\n  .sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0))\n  .filter(s => {\n    if (!s.url || seen.has(s.url)) return false;\n    seen.add(s.url);\n    return true;\n  });\n\nreturn [{ json: {\n  sources: merged,\n  metadata: {\n    workflowName: 'nexus-full-research',\n    totalSources: merged.length,\n    breakdown: {\n      github: merged.filter(s => s.sourceType === 'github').length,\n      reddit: merged.filter(s => s.sourceType === 'reddit').length,\n      youtube: merged.filter(s => s.sourceType === 'youtube').length,\n      webpage: merged.filter(s => s.sourceType === 'webpage').length,\n    },\n    durationMs: Date.now()\n  }\n}}];"
+      },
+      "id": "merge-results",
+      "name": "Merge All Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1180, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Prepare Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Payload": {
+      "main": [
+        [
+          { "node": "GitHub Research", "type": "main", "index": 0 },
+          { "node": "Reddit Research", "type": "main", "index": 0 },
+          { "node": "YouTube Research", "type": "main", "index": 0 },
+          { "node": "Competitive Analysis", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "GitHub Research": {
+      "main": [
+        [{ "node": "Merge All Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reddit Research": {
+      "main": [
+        [{ "node": "Merge All Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "YouTube Research": {
+      "main": [
+        [{ "node": "Merge All Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Competitive Analysis": {
+      "main": [
+        [{ "node": "Merge All Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge All Results": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" },
+    { "name": "Orchestrator" }
+  ]
+}

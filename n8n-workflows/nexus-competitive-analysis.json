@@ -1,0 +1,105 @@
+{
+  "name": "NEXUS — Competitive Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "competitive_analysis",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-competitive-analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { ideaPrompt, briefId } = $input.first().json.body;\n\n// Build competitive search queries\nconst baseIdea = ideaPrompt.slice(0, 100);\nconst queries = [\n  `${baseIdea} competitors alternatives`,\n  `${baseIdea} market analysis comparison`,\n  `best ${baseIdea} tools software 2025 2026`\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
+      },
+      "id": "build-queries",
+      "name": "Build Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.duckduckgo.com/?q={{ encodeURIComponent($json.query) }}&format=json&no_redirect=1&no_html=1",
+        "options": {
+          "timeout": 10000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "NEXUS-Research-Bot/1.0"
+            }
+          ]
+        }
+      },
+      "id": "web-search",
+      "name": "DuckDuckGo Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process competitive analysis results\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const data = item.json;\n  \n  // Process DuckDuckGo Instant Answer topics\n  const topics = data?.RelatedTopics || [];\n  for (const topic of topics.slice(0, 3)) {\n    if (!topic.Text && !topic.FirstURL) continue;\n    \n    allSources.push({\n      sourceType: 'webpage',\n      url: topic.FirstURL || '',\n      title: (topic.Text || 'Competitive Result').slice(0, 500),\n      snippet: (topic.Text || '').slice(0, 300),\n      trustScore: 45, // Moderate trust for web search results\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'competitive_analysis',\n        icon: topic.Icon?.URL\n      }\n    });\n  }\n  \n  // Process Abstract (if available)\n  if (data?.Abstract && data?.AbstractURL) {\n    allSources.push({\n      sourceType: 'webpage',\n      url: data.AbstractURL,\n      title: data.Heading || 'Competitive Overview',\n      snippet: data.Abstract.slice(0, 300),\n      trustScore: 55,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'competitive_analysis',\n        abstractSource: data.AbstractSource\n      }\n    });\n  }\n}\n\n// Deduplicate by URL\nconst seen = new Set();\nconst unique = allSources\n  .filter(s => s.url)\n  .filter(s => {\n    if (seen.has(s.url)) return false;\n    seen.add(s.url);\n    return true;\n  })\n  .sort((a, b) => b.trustScore - a.trustScore)\n  .slice(0, 8);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    workflowName: 'nexus-competitive-analysis',\n    totalResults: allSources.length,\n    uniqueSources: unique.length\n  }\n}}];"
+      },
+      "id": "process-results",
+      "name": "Process Competitive Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Build Search Queries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Search Queries": {
+      "main": [
+        [{ "node": "DuckDuckGo Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "DuckDuckGo Search": {
+      "main": [
+        [{ "node": "Process Competitive Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Competitive Data": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" }
+  ]
+}

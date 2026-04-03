@@ -1,0 +1,108 @@
+{
+  "name": "NEXUS — GitHub Research",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-github-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract search query from NEXUS payload\nconst { ideaPrompt, briefId, departments } = $input.first().json.body;\n\n// Build focused search queries\nconst baseQuery = ideaPrompt.slice(0, 120);\nconst queries = [\n  baseQuery,\n  `${baseQuery} typescript react`,\n  `${baseQuery} nodejs express`\n];\n\nreturn [{ json: { briefId, ideaPrompt, queries, departments } }];"
+      },
+      "id": "extract-query",
+      "name": "Extract Search Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.github.com/search/repositories?q={{ encodeURIComponent($json.queries[0]) }}&sort=stars&per_page=5",
+        "options": {
+          "timeout": 15000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "NEXUS-Research-Bot"
+            }
+          ]
+        }
+      },
+      "id": "github-search",
+      "name": "GitHub API Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process GitHub search results and calculate Trust Scores\nconst items = $input.first().json;\nconst repos = items.items || [];\nconst briefId = $('Extract Search Query').first().json.briefId;\nconst callbackUrl = $('Extract Search Query').first().json.callbackUrl;\n\nconst sources = repos.slice(0, 5).map(repo => {\n  const stars = repo.stargazers_count || 0;\n  const contributors = repo.contributors_count || repo.forks_count || 1;\n  \n  // Trust Score formula matching NEXUS: log10(stars+1)*20 + log10(contributors+1)*10\n  const trustScore = Math.min(100, Math.round(\n    Math.log10(stars + 1) * 20 + Math.log10(contributors + 1) * 10\n  ));\n  \n  return {\n    sourceType: 'github',\n    url: repo.html_url,\n    title: `${repo.full_name} — ${repo.description || 'No description'}`.slice(0, 500),\n    snippet: `⭐ ${stars.toLocaleString()} stars | 🍴 ${repo.forks_count} forks | Language: ${repo.language || 'N/A'} | Updated: ${repo.updated_at?.split('T')[0] || 'Unknown'}`,\n    trustScore,\n    githubStars: stars,\n    contributorCount: contributors,\n    rawPayload: {\n      source: 'n8n',\n      workflowType: 'github_research',\n      fullName: repo.full_name,\n      language: repo.language,\n      topics: repo.topics,\n      license: repo.license?.spdx_id,\n      openIssues: repo.open_issues_count,\n      createdAt: repo.created_at,\n      updatedAt: repo.updated_at\n    }\n  };\n});\n\nreturn [{ json: {\n  sources,\n  metadata: {\n    workflowName: 'nexus-github-research',\n    durationMs: Date.now(),\n    totalRepos: repos.length,\n    briefId\n  }\n}}];"
+      },
+      "id": "process-results",
+      "name": "Calculate Trust Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Extract Search Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Search Query": {
+      "main": [
+        [{ "node": "GitHub API Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "GitHub API Search": {
+      "main": [
+        [{ "node": "Calculate Trust Scores", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Trust Scores": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" }
+  ]
+}
