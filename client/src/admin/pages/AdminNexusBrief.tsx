@@ -2249,11 +2249,15 @@ export default function AdminNexusBrief() {
                 {github.length > 0 && (
                   <div>
                     <button onClick={() => setCollapsedSections(s => ({ ...s, github: !s.github }))}
-                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
-                      <span>🐙</span> GitHub Repos ({github.length})
-                      {collapsedSections.github ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-600 bg-slate-800/80 hover:bg-slate-700/80 hover:border-slate-500 transition-all">
+                      <span className="text-lg">🐙</span>
+                      <span className="text-sm font-semibold text-slate-200">GitHub Repos</span>
+                      <span className="text-xs text-slate-400">({github.length})</span>
+                      <div className="mr-auto w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center">
+                        {collapsedSections.github ? <ChevronDown className="w-4 h-4 text-slate-300" /> : <ChevronUp className="w-4 h-4 text-slate-300" />}
+                      </div>
                     </button>
-                    <div className={`space-y-2 ${collapsedSections.github ? 'hidden' : ''}`}>
+                    <div className={`space-y-2 mt-3 ${collapsedSections.github ? 'hidden' : ''}`}>
                       {github.map((s) => (
                         <div key={s.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 hover:border-slate-600 transition-colors">
                           <div className="flex-1 min-w-0">
@@ -2294,11 +2298,15 @@ export default function AdminNexusBrief() {
                 {reddit.length > 0 && (
                   <div>
                     <button onClick={() => setCollapsedSections(s => ({ ...s, reddit: !s.reddit }))}
-                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
-                      <span>🤖</span> Reddit — {tt('דיונים קהילתיים')} ({reddit.length})
-                      {collapsedSections.reddit ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-600 bg-slate-800/80 hover:bg-slate-700/80 hover:border-slate-500 transition-all">
+                      <span className="text-lg">🔶</span>
+                      <span className="text-sm font-semibold text-slate-200">Reddit — {tt('דיונים קהילתיים')}</span>
+                      <span className="text-xs text-slate-400">({reddit.length})</span>
+                      <div className="mr-auto w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center">
+                        {collapsedSections.reddit ? <ChevronDown className="w-4 h-4 text-slate-300" /> : <ChevronUp className="w-4 h-4 text-slate-300" />}
+                      </div>
                     </button>
-                    <div className={`space-y-2 ${collapsedSections.reddit ? 'hidden' : ''}`}>
+                    <div className={`space-y-2 mt-3 ${collapsedSections.reddit ? 'hidden' : ''}`}>
                       {reddit.map((s) => (
                         <div key={s.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 hover:border-slate-600 transition-colors">
                           <div className="flex-1 min-w-0">
@@ -2332,11 +2340,16 @@ export default function AdminNexusBrief() {
                 {articles.length > 0 && (
                   <div>
                     <button onClick={() => setCollapsedSections(s => ({ ...s, articles: !s.articles }))}
-                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
-                      <Rss className="w-3.5 h-3.5" /> {tt('מאמרים, בלוגים ו-YouTube')} ({articles.length})
-                      {collapsedSections.articles ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-600 bg-slate-800/80 hover:bg-slate-700/80 hover:border-slate-500 transition-all">
+                      <span className="text-lg">📰</span>
+                      <span className="text-sm font-semibold text-slate-200">{tt('מאמרים, בלוגים')}</span>
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-xs font-bold">▶ YouTube</span>
+                      <span className="text-xs text-slate-400">({articles.length})</span>
+                      <div className="mr-auto w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center">
+                        {collapsedSections.articles ? <ChevronDown className="w-4 h-4 text-slate-300" /> : <ChevronUp className="w-4 h-4 text-slate-300" />}
+                      </div>
                     </button>
-                    <div className={`space-y-2 ${collapsedSections.articles ? 'hidden' : ''}`}>
+                    <div className={`space-y-2 mt-3 ${collapsedSections.articles ? 'hidden' : ''}`}>
                       {articles.map((s) => {
                         const cat = String((s.rawPayload as any)?.category ?? 'tech');
                         const catIcon = RSS_CATEGORY_ICONS[cat] ?? '📄';
