@@ -1730,20 +1730,22 @@ export default function AdminNexusBrief() {
           MEETING MODE (V2)
           ════════════════════════════════════════════════════════ */}
       {isMeetingMode && brief.status !== 'draft' && (
-        <AdminNexusMeetingMode
-          briefId={briefId ?? ''}
-          brief={{
-            ideaPrompt: brief.ideaPrompt,
-            selectedDepartments: brief.selectedDepartments,
-            selectedModels: brief.selectedModels ?? [],
-            currentRound: (brief as any).currentRound,
-            round1Synthesis: (brief as any).round1Synthesis,
-            round2Synthesis: (brief as any).round2Synthesis,
-            round3Synthesis: (brief as any).round3Synthesis,
-          }}
-          tt={tt}
-          onReload={loadBrief}
-        />
+        <div className="mb-8">
+          <AdminNexusMeetingMode
+            briefId={briefId ?? ''}
+            brief={{
+              ideaPrompt: brief.ideaPrompt,
+              selectedDepartments: brief.selectedDepartments,
+              selectedModels: brief.selectedModels ?? [],
+              currentRound: (brief as any).currentRound,
+              round1Synthesis: (brief as any).round1Synthesis,
+              round2Synthesis: (brief as any).round2Synthesis,
+              round3Synthesis: (brief as any).round3Synthesis,
+            }}
+            tt={tt}
+            onReload={loadBrief}
+          />
+        </div>
       )}
 
       {/* ════════════════════════════════════════════════════════
