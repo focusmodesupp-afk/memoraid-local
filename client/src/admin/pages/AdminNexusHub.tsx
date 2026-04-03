@@ -14,8 +14,10 @@ import {
   ChevronRight,
   Zap,
   Settings,
+  Lightbulb,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
+import { useAdminI18n } from '../hooks/useAdminI18n';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type NexusBriefStatus =
@@ -72,10 +74,12 @@ function BriefCard({
   brief,
   onClick,
   onDelete,
+  tt,
 }: {
   brief: NexusBriefSummary;
   onClick: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  tt: (s: string) => string;
 }) {
   const sc = STATUS_CONFIG[brief.status];
   const canDelete = true; // Always show delete button — server enforces confirmation for non-draft
@@ -98,7 +102,7 @@ function BriefCard({
         </div>
         <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${sc.color}`}>
           {sc.icon}
-          {sc.label}
+          {tt(sc.label)}
         </span>
       </div>
 
@@ -122,7 +126,7 @@ function BriefCard({
             <button
               onClick={onDelete}
               className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400 transition-opacity"
-              title="מחק"
+              title={tt('מחק')}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -135,7 +139,7 @@ function BriefCard({
 }
 
 // ── New Brief Modal ────────────────────────────────────────────────────────────
-function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (id: string) => void }) {
+function NewBriefModal({ onClose, onCreate, tt }: { onClose: () => void; onCreate: (id: string) => void; tt: (s: string) => string }) {
   const [ideaPrompt, setIdeaPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +155,7 @@ function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (
       });
       onCreate(data.brief.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'שגיאה ביצירת הניירת');
+      setError(e instanceof Error ? e.message : tt('שגיאה ביצירת הניירת'));
     } finally {
       setLoading(false);
     }
@@ -162,21 +166,21 @@ function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (
       <div className="w-full max-w-lg mx-4 rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
         <div className="flex items-center gap-2 mb-4">
           <Cpu className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-lg font-bold text-slate-100">ניירת Nexus חדשה</h2>
+          <h2 className="text-lg font-bold text-slate-100">{tt('ניירת Nexus חדשה')}</h2>
         </div>
 
-        <label className="block text-xs text-slate-400 mb-1.5">תאר את הרעיון שלך *</label>
+        <label className="block text-xs text-slate-400 mb-1.5">{tt('תאר את הרעיון שלך *')}</label>
         <textarea
           value={ideaPrompt}
           onChange={(e) => setIdeaPrompt(e.target.value)}
           rows={5}
-          placeholder="לדוגמה: מערכת תזכורות חכמה לנטילת תרופות עם AI שמנתח דפוסים והתרעות חריגות..."
+          placeholder={tt('לדוגמה: מערכת תזכורות חכמה לנטילת תרופות עם AI שמנתח דפוסים והתרעות חריגות...')}
           className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-slate-200 text-sm placeholder-slate-500 resize-none focus:outline-none focus:border-indigo-500 transition-colors"
           dir="rtl"
         />
         <div className="flex justify-between items-center mt-1 mb-4">
-          <span className="text-xs text-slate-500">{ideaPrompt.length} תווים</span>
-          <span className="text-xs text-slate-500">תוכל לבחור מחלקות ומודלים בשלב הבא</span>
+          <span className="text-xs text-slate-500">{ideaPrompt.length} {tt('תווים')}</span>
+          <span className="text-xs text-slate-500">{tt('תוכל לבחור מחלקות ומודלים בשלב הבא')}</span>
         </div>
 
         {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
@@ -186,7 +190,7 @@ function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
           >
-            ביטול
+            {tt('ביטול')}
           </button>
           <button
             onClick={handleCreate}
@@ -194,7 +198,7 @@ function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (
             className="flex items-center gap-2 px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            צור ניירת
+            {tt('צור ניירת')}
           </button>
         </div>
       </div>
@@ -204,6 +208,7 @@ function NewBriefModal({ onClose, onCreate }: { onClose: () => void; onCreate: (
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function AdminNexusHub() {
+  const { tt } = useAdminI18n();
   const [, navigate] = useLocation();
   const [briefs, setBriefs] = useState<NexusBriefSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -230,8 +235,8 @@ export default function AdminNexusHub() {
     e.stopPropagation();
     const isDraftOrRejected = status === 'draft' || status === 'rejected';
     const msg = isDraftOrRejected
-      ? 'האם למחוק את הניירת?'
-      : 'הניירת אינה בסטטוס טיוטה או דחויה.\nהאם למחוק בכל זאת? פעולה זו בלתי הפיכה.';
+      ? tt('האם למחוק את הניירת?')
+      : tt('הניירת אינה בסטטוס טיוטה או דחויה.\nהאם למחוק בכל זאת? פעולה זו בלתי הפיכה.');
     if (!confirm(msg)) return;
     try {
       await apiFetch(`/admin/nexus/briefs/${id}`, {
@@ -240,7 +245,7 @@ export default function AdminNexusHub() {
       });
       setBriefs((prev) => prev.filter((b) => b.id !== id));
     } catch {
-      alert('שגיאה במחיקה');
+      alert(tt('שגיאה במחיקה'));
     }
   };
 
@@ -268,15 +273,15 @@ export default function AdminNexusHub() {
             <Cpu className="w-6 h-6 text-indigo-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-100">Nexus – בית תוכנה וירטואלי</h1>
-            <p className="text-sm text-slate-400">מחקר רב-מחלקתי מבוסס AI לכל רעיון פיתוח</p>
+            <h1 className="text-2xl font-bold text-slate-100">{tt('Nexus – בית תוכנה וירטואלי')}</h1>
+            <p className="text-sm text-slate-400">{tt('מחקר רב-מחלקתי מבוסס AI לכל רעיון פיתוח')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate('/admin/nexus/settings')}
             className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
-            title="הגדרות Nexus"
+            title={tt('הגדרות Nexus')}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -285,7 +290,7 @@ export default function AdminNexusHub() {
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20"
           >
             <Plus className="w-4 h-4" />
-            ניירת חדשה
+            {tt('ניירת חדשה')}
           </button>
         </div>
       </div>
@@ -293,10 +298,10 @@ export default function AdminNexusHub() {
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-3 mb-6">
         {[
-          { label: 'סה"כ ניירות', value: stats.total, color: 'text-slate-200' },
-          { label: 'בסקירה', value: stats.review, color: 'text-amber-400' },
-          { label: 'חוקרות', value: stats.researching, color: 'text-blue-400' },
-          { label: 'אושרו', value: stats.approved, color: 'text-green-400' },
+          { label: tt('סה"כ ניירות'), value: stats.total, color: 'text-slate-200' },
+          { label: tt('בסקירה'), value: stats.review, color: 'text-amber-400' },
+          { label: tt('חוקרות'), value: stats.researching, color: 'text-blue-400' },
+          { label: tt('אושרו'), value: stats.approved, color: 'text-green-400' },
         ].map((s) => (
           <div key={s.label} className="p-3 rounded-xl border border-slate-700 bg-slate-800/40 text-center">
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
@@ -305,7 +310,45 @@ export default function AdminNexusHub() {
         ))}
       </div>
 
+      {/* Quick Navigation */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <a href="#briefs-list" className="group relative rounded-2xl bg-gradient-to-br from-indigo-600/25 to-purple-600/25 border border-indigo-500/40 p-5 cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:shadow-xl hover:shadow-black/20">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-900/60 flex items-center justify-center text-indigo-400">
+              <FlaskConical className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">{tt('NEXUS — ניירות מחקר')}</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{tt('צפה, חקור וצור ניירות מחקר חדשות')}</p>
+            </div>
+          </div>
+        </a>
+        <div onClick={() => navigate('/admin/nexus/ideas')} className="group relative rounded-2xl bg-gradient-to-br from-amber-600/25 to-orange-600/25 border border-amber-500/40 p-5 cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:shadow-xl hover:shadow-black/20">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-900/60 flex items-center justify-center text-amber-400">
+              <Lightbulb className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">{tt('NEXUS — בנק רעיונות')}</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{tt('תעדף, הצבע והחלט מה לפתח')}</p>
+            </div>
+          </div>
+        </div>
+        <div onClick={() => navigate('/admin/nexus/settings')} className="group relative rounded-2xl bg-gradient-to-br from-emerald-600/25 to-teal-600/25 border border-emerald-500/40 p-5 cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:shadow-xl hover:shadow-black/20">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-900/60 flex items-center justify-center text-emerald-400">
+              <Settings className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">{tt('NEXUS — הגדרות')}</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{tt('מחלקות, צוותים, מודלים ותבניות')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Filter tabs + search */}
+      <div id="briefs-list"></div>
       <div className="flex items-center gap-3 mb-5">
         <div className="flex gap-1 p-1 rounded-lg bg-slate-800 border border-slate-700">
           {STATUS_TABS.map((t) => (
@@ -318,7 +361,7 @@ export default function AdminNexusHub() {
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {t.label}
+              {tt(t.label)}
             </button>
           ))}
         </div>
@@ -327,7 +370,7 @@ export default function AdminNexusHub() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="חיפוש ניירות..."
+            placeholder={tt('חיפוש ניירות...')}
             className="w-full pr-9 pl-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
@@ -341,14 +384,14 @@ export default function AdminNexusHub() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FlaskConical className="w-12 h-12 text-slate-600 mb-3" />
-          <p className="text-slate-400 font-medium">אין ניירות מחקר עדיין</p>
-          <p className="text-slate-500 text-sm mt-1">לחץ "ניירת חדשה" כדי להתחיל מחקר Nexus</p>
+          <p className="text-slate-400 font-medium">{tt('אין ניירות מחקר עדיין')}</p>
+          <p className="text-slate-500 text-sm mt-1">{tt('לחץ "ניירת חדשה" כדי להתחיל מחקר Nexus')}</p>
           <button
             onClick={() => setShowNewModal(true)}
             className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
           >
             <Plus className="w-4 h-4" />
-            צור ניירת ראשונה
+            {tt('צור ניירת ראשונה')}
           </button>
         </div>
       ) : (
@@ -359,6 +402,7 @@ export default function AdminNexusHub() {
               brief={brief}
               onClick={() => navigate(`/admin/nexus/briefs/${brief.id}`)}
               onDelete={(e) => void handleDelete(e, brief.id, brief.status)}
+              tt={tt}
             />
           ))}
         </div>
@@ -371,6 +415,7 @@ export default function AdminNexusHub() {
             setShowNewModal(false);
             navigate(`/admin/nexus/briefs/${id}`);
           }}
+          tt={tt}
         />
       )}
     </div>
