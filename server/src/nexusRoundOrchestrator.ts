@@ -125,22 +125,51 @@ async function runEmployeeAgent(opts: {
   });
 
   try {
+    // Auto-retry chain: try preferred model → claude → gpt-4o → gemini flash
+    const FALLBACK_MODELS: AIProviderId[] = [
+      'claude-sonnet-4-6' as AIProviderId,
+      'gpt-4o' as AIProviderId,
+      'gemini-2.5-flash' as AIProviderId,
+    ];
     const preferredModels: AIProviderId[] = opts.model
-      ? [opts.model as AIProviderId]
-      : [];
+      ? [opts.model as AIProviderId, ...FALLBACK_MODELS.filter(m => m !== opts.model)]
+      : FALLBACK_MODELS;
 
-    const result = await callAI(
-      'departmentAnalysis',
-      [
-        { role: 'system', content: envelope.systemPrompt },
-        { role: 'user', content: envelope.userPrompt },
-      ],
-      {
-        preferredModels: preferredModels.length > 0 ? preferredModels : undefined,
-        adminUserId: opts.adminUserId ?? undefined,
-        maxTokens: 3000,
-      },
-    );
+    let result: any = null;
+    let lastError = '';
+
+    for (const model of preferredModels) {
+      try {
+        result = await callAI(
+          'departmentAnalysis',
+          [
+            { role: 'system', content: envelope.systemPrompt },
+            { role: 'user', content: envelope.userPrompt },
+          ],
+          {
+            preferredModels: [model],
+            adminUserId: opts.adminUserId ?? undefined,
+            maxTokens: 3000,
+          },
+        );
+        if (result?.content) break; // Success — stop retrying
+      } catch (retryErr) {
+        lastError = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        console.warn(`[RoundOrchestrator] ${employee.name} failed with ${model}: ${lastError.slice(0, 80)}. Trying next model...`);
+        result = null;
+      }
+    }
+
+    if (!result?.content) {
+      return {
+        output: `> Error: all models failed. Last error: ${lastError}`,
+        outputJson: null,
+        modelUsed: 'error',
+        tokensUsed: 0,
+        costUsd: 0,
+        error: lastError || 'All models failed',
+      };
+    }
 
     // Try to parse JSON from response
     let outputJson: Record<string, unknown> | null = null;
@@ -198,15 +227,33 @@ export async function runMeetingRound(opts: {
     throw new Error(`No participants found for round ${roundNumber} (levels: ${config.levels.join(',')})`);
   }
 
-  // Create round record
-  const [round] = await db.insert(nexusBriefRounds).values({
-    briefId,
-    roundNumber,
-    roundType: config.type,
-    status: 'researching',
-    participantCount: participants.length,
-    startedAt: new Date(),
-  }).returning();
+  // Create or reuse round record (prevent duplicates on re-run)
+  const existingRounds = await db.select().from(nexusBriefRounds)
+    .where(sql`brief_id = ${briefId} AND round_number = ${roundNumber}`);
+
+  let round: typeof existingRounds[0];
+  if (existingRounds.length > 0) {
+    // Reuse existing round — clear old results
+    round = existingRounds[0];
+    await db.execute(sql`DELETE FROM nexus_brief_round_results WHERE round_id = ${round.id}`);
+    await db.update(nexusBriefRounds).set({
+      status: 'researching',
+      participantCount: participants.length,
+      completedCount: 0,
+      startedAt: new Date(),
+      completedAt: null,
+    }).where(eq(nexusBriefRounds.id, round.id));
+    console.log(`[RoundOrchestrator] Reusing existing round ${round.id.slice(0, 8)} for round ${roundNumber}`);
+  } else {
+    [round] = await db.insert(nexusBriefRounds).values({
+      briefId,
+      roundNumber,
+      roundType: config.type,
+      status: 'researching',
+      participantCount: participants.length,
+      startedAt: new Date(),
+    }).returning();
+  }
 
   sseWrite(sseRes, 'round_start', {
     roundNumber,
@@ -333,7 +380,8 @@ export async function runMeetingRound(opts: {
       adminUserId,
     });
 
-    // Save result to DB
+    // Save result to DB (upsert — delete old result for this employee in this round first)
+    await db.execute(sql`DELETE FROM nexus_brief_round_results WHERE round_id = ${round.id} AND employee_name = ${employee.name}`);
     await db.insert(nexusBriefRoundResults).values({
       briefId,
       roundId: round.id,
