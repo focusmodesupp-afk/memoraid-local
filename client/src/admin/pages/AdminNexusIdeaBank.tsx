@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Lightbulb, Plus, ThumbsUp, ThumbsDown, Star, Clock, Tag,
   ChevronDown, ChevronUp, Loader2, CheckCircle, XCircle, AlertCircle,
-  ArrowRight, Calendar, Edit3, Trash2, MessageSquare, Filter,
+  ArrowRight, Calendar, Edit3, Trash2, MessageSquare, Filter, ExternalLink,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 
@@ -316,6 +316,20 @@ export default function AdminNexusIdeaBank() {
             </div>
 
             <p className="text-sm text-slate-300 mb-4 whitespace-pre-wrap">{selectedIdea.description}</p>
+
+            {/* Source project link */}
+            {selectedIdea.sourceBriefId && (
+              <a
+                href={`/admin/nexus/briefs/${selectedIdea.sourceBriefId}${selectedIdea.sourceDepartment ? `#dept-${selectedIdea.sourceDepartment}` : ''}`}
+                className="flex items-center justify-center gap-3 w-full py-3 mb-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-colors"
+              >
+                <ExternalLink className="w-5 h-5" />
+                מעבר לפרויקט מקור
+                {selectedIdea.sourceDepartment && (
+                  <span className="px-2 py-0.5 rounded-full bg-white/20 text-xs">{selectedIdea.sourceDepartment}</span>
+                )}
+              </a>
+            )}
 
             {/* CEO Recommendation */}
             <div className="mb-4">
