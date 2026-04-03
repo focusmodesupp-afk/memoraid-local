@@ -16,6 +16,8 @@ import { gatherWebIntelligence, type WebSource } from './nexusWebIntelligence';
 import { gatherWebIntelligenceHybrid, isN8NConfigured } from './n8nBridge';
 import {
   runAllDepartmentAgents,
+  runAIDevTranslation,
+  loadNexusConfig,
   getDepartmentInfo,
   type DepartmentId,
   type DepartmentResult,
@@ -160,6 +162,8 @@ export function assembleBrief(opts: {
 
   lines.push('## סיכום והמלצות לפיתוח');
   lines.push('');
+  lines.push('{{AI_SYNTHESIS_PLACEHOLDER}}');
+  lines.push('');
   lines.push('> **הוראות לאדמין:** עיין בממצאי כל מחלקה, אשר שינויים הנדרשים, ולחץ "אשר ניירת" להמשך תהליך הפיתוח.');
   lines.push('');
 
@@ -213,14 +217,48 @@ export async function runNexusOrchestrator(opts: {
       totalDepts: departments.length,
     });
 
+    // ── Cost governance: check daily spend before proceeding ─────────────────
+    try {
+      const todaySpend = await db.execute(sql`
+        SELECT COALESCE(SUM(cost_usd::numeric), 0)::text AS total
+        FROM ai_usage
+        WHERE created_at >= CURRENT_DATE
+          AND admin_user_id IS NOT NULL
+      `);
+      const dailySpent = parseFloat((todaySpend as any).rows?.[0]?.total ?? '0');
+      const DAILY_BUDGET_USD = 100; // Configurable daily budget cap
+      if (dailySpent >= DAILY_BUDGET_USD) {
+        console.warn(`[NEXUS] Daily budget exceeded: $${dailySpent.toFixed(2)} / $${DAILY_BUDGET_USD}`);
+        sseWrite(sseRes, 'warning', {
+          type: 'budget_exceeded',
+          message: `תקציב יומי חרג: $${dailySpent.toFixed(2)} מתוך $${DAILY_BUDGET_USD}. המחקר ימשיך אך שים לב לעלויות.`,
+          dailySpent,
+          dailyBudget: DAILY_BUDGET_USD,
+        });
+      } else {
+        const estimatedCost = departments.length * 1.8; // ~$1.8 per department average
+        if (dailySpent + estimatedCost > DAILY_BUDGET_USD * 0.8) {
+          sseWrite(sseRes, 'warning', {
+            type: 'budget_warning',
+            message: `התקרבות לתקציב יומי: $${dailySpent.toFixed(2)} מתוך $${DAILY_BUDGET_USD} (מחקר זה יעלה ~$${estimatedCost.toFixed(0)}).`,
+            dailySpent,
+            estimatedCost,
+            dailyBudget: DAILY_BUDGET_USD,
+          });
+        }
+      }
+    } catch {
+      // Cost check is non-fatal
+    }
+
     // ── Step 2: Gather codebase context ─────────────────────────────────────
     let codebaseContext = '';
     let linesScanned = 0;
     try {
-      const projectData = await gatherProjectData({
-        depth: codebaseDepth as 'quick' | 'deep' | 'full',
-        scope: codebaseScope as 'all' | 'client' | 'server',
-      });
+      const projectData = await gatherProjectData(
+        codebaseDepth as 'quick' | 'deep' | 'full',
+        codebaseScope as 'all' | 'client' | 'server',
+      );
       const isExistingProject = (contextNotes ?? '').startsWith('[EXISTING_PROJECT]');
       const existingProjectPrefix = isExistingProject
         ? `⚠️ CRITICAL CONTEXT: This is an EXISTING production codebase — NOT a greenfield project.
@@ -310,7 +348,7 @@ export async function runNexusOrchestrator(opts: {
           await db.insert(nexusBriefDepartments).values({
             briefId,
             department: result.department,
-            status: result.error ? 'error' : 'done',
+            status: result.error ? 'error' : 'completed',
             output: result.output,
             promptSnapshot: result.promptSnapshot ?? null,
             modelUsed: result.modelUsed,
@@ -342,10 +380,64 @@ export async function runNexusOrchestrator(opts: {
       },
     });
 
+    // ── Step 4.5: AI Development Translation (sequential, after all depts) ──
+    if (departmentResults.filter(r => !r.error).length > 0) {
+      sseWrite(sseRes, 'department_start', { department: 'ai-dev', hebrewName: 'תרגום AI לפיתוח' });
+      try {
+        const nexusConfig = await loadNexusConfig();
+        const aiDevResult = await runAIDevTranslation({
+          departmentResults,
+          ideaPrompt,
+          codebaseContext,
+          models: models as AIProviderId[],
+          adminUserId,
+          nexusConfig,
+          briefId,
+        });
+        totalCost += aiDevResult.costUsd;
+        totalTokens += aiDevResult.tokensUsed;
+        departmentResults.push(aiDevResult);
+
+        // Save to DB
+        try {
+          await db.insert(nexusBriefDepartments).values({
+            briefId,
+            department: 'ai-dev',
+            status: aiDevResult.error ? 'error' : 'completed',
+            output: aiDevResult.output,
+            promptSnapshot: aiDevResult.promptSnapshot ?? null,
+            modelUsed: aiDevResult.modelUsed,
+            tokensUsed: aiDevResult.tokensUsed,
+            costUsd: String(aiDevResult.costUsd.toFixed(6)),
+            errorMessage: aiDevResult.error ?? aiDevResult.fallbackReason ?? null,
+            startedAt: new Date(),
+            completedAt: new Date(),
+          });
+        } catch { /* non-fatal */ }
+
+        if (aiDevResult.error) {
+          sseWrite(sseRes, 'department_error', { department: 'ai-dev', error: aiDevResult.error });
+        } else {
+          sseWrite(sseRes, 'department_done', {
+            department: 'ai-dev',
+            tokensUsed: aiDevResult.tokensUsed,
+            costUsd: aiDevResult.costUsd,
+            outputPreview: aiDevResult.output.slice(0, 200),
+            modelUsed: aiDevResult.modelUsed,
+            fallbackReason: aiDevResult.fallbackReason ?? null,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[NexusOrchestrator] AI Dev Translation error:', msg);
+        sseWrite(sseRes, 'department_error', { department: 'ai-dev', error: msg });
+      }
+    }
+
     // ── Step 5: Assemble brief ───────────────────────────────────────────────
     sseWrite(sseRes, 'assembly_start', {});
 
-    const assembledBrief = assembleBrief({
+    let assembledBrief = assembleBrief({
       ideaPrompt,
       models,
       departments,
@@ -353,6 +445,37 @@ export async function runNexusOrchestrator(opts: {
       sourceCount: webIntelligence.sources.length,
       targetPlatforms,
     });
+
+    // Generate AI cross-department synthesis to replace static placeholder
+    try {
+      const deptSummaries = departmentResults
+        .filter(r => !r.error && r.output)
+        .map(r => `[${r.department}]: ${r.output?.slice(0, 300)}`)
+        .join('\n');
+      const synthesisResult = await callAI(
+        'briefSummary',
+        [{
+          role: 'user',
+          content: `בהתבסס על ממצאי ${departmentResults.filter(r => !r.error).length} מחלקות שחקרו את הרעיון "${ideaPrompt}", כתוב סיכום מנהלים בעברית (5-8 משפטים) שכולל:
+1. נקודות הסכמה — מה רוב המחלקות ממליצות
+2. סתירות או חילוקי דעות בין מחלקות (אם יש)
+3. סיכונים מרכזיים שזוהו
+4. המלצת עדיפות לפיתוח
+5. פערים שנותרו (מידע שלא נמצא)
+
+ממצאים מקוצרים:
+${deptSummaries.slice(0, 4000)}`
+        }],
+        { maxTokens: 800 }
+      );
+      if (synthesisResult?.content) {
+        assembledBrief = assembledBrief.replace('{{AI_SYNTHESIS_PLACEHOLDER}}', synthesisResult.content);
+      } else {
+        assembledBrief = assembledBrief.replace('{{AI_SYNTHESIS_PLACEHOLDER}}', '> סיכום AI לא זמין — עיין בממצאי המחלקות למעלה.');
+      }
+    } catch {
+      assembledBrief = assembledBrief.replace('{{AI_SYNTHESIS_PLACEHOLDER}}', '> סיכום AI לא זמין — עיין בממצאי המחלקות למעלה.');
+    }
 
     // Generate a concise smart title using AI
     const smartTitle = await generateSmartTitle(ideaPrompt);
@@ -377,6 +500,16 @@ export async function runNexusOrchestrator(opts: {
 
     // ── Step 6: Learn from high-trust sources (background, non-blocking) ────
     void learnFromSources(webIntelligence.sources);
+
+    // ── Step 6b: Evaluate automation rules for research_done (non-blocking) ──
+    import('./nexusRulesEngine').then(({ evaluateRules }) => {
+      evaluateRules('research_done', {
+        briefId,
+        briefTitle: smartTitle,
+        adminUserId: adminUserId ?? undefined,
+        departmentCount: departmentResults.filter(r => !r.error).length,
+      }).catch(e => console.error('[NexusOrchestrator] rules evaluation error:', e));
+    });
 
     // ── Step 7: Done ─────────────────────────────────────────────────────────
     sseWrite(sseRes, 'done', {

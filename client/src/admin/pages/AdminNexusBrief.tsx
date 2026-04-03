@@ -41,6 +41,7 @@ import {
 import { apiFetch } from '../../lib/api';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadAsPdf, downloadAsWord, downloadAllDocsAsZip } from '../utils/documentDownload';
+import { useAdminI18n } from '../hooks/useAdminI18n';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type NexusBriefStatus =
@@ -110,6 +111,23 @@ type ExtractedTask = {
   accepted: boolean | null;
 };
 
+type BriefQuestion = {
+  id: string;
+  briefId: string;
+  department: string;
+  gate: string;
+  role: string | null;
+  question: string;
+  answer: string | null;
+  answerSource: string | null;
+  sourceUrl: string | null;
+  confidence: number;
+  verified: boolean;
+  position: number;
+  // snake_case from raw SQL — 'manual_only' | 'codebase_scan' | 'ai_research' | 'perplexity'
+  answer_strategy?: string | null;
+};
+
 type Phase = { id: string; name: string };
 
 type AIModelInfo = { id: string; label: string; available: boolean };
@@ -157,6 +175,9 @@ const ALL_DEPARTMENTS = [
   { id: 'legal',    hebrewName: 'משפטי ורגולציה',         emoji: '⚖️', description: 'רישיונות, GDPR, סיכונים' },
   { id: 'marketing',hebrewName: 'שיווק וצמיחה',           emoji: '📣', description: 'GTM, SEO, positioning' },
   { id: 'finance',  hebrewName: 'פיננסים ו-BI (CFO)',     emoji: '💰', description: 'ROI, unit economics, Stage-Gate' },
+  { id: 'hr',       hebrewName: 'משאבי אנוש (HR)',       emoji: '👥', description: 'גיוס, תרבות, onboarding' },
+  { id: 'cs',       hebrewName: 'הצלחת לקוחות (CS)',     emoji: '🤝', description: 'Churn, retention, NPS' },
+  { id: 'sales',    hebrewName: 'מכירות (Sales)',         emoji: '💼', description: 'Pipeline, pricing, closing' },
 ];
 
 const DEPTH_OPTIONS = [
@@ -175,6 +196,20 @@ const SCOPE_OPTIONS = [
 function TrustBadge({ score }: { score: number }) {
   const color = score >= 70 ? 'bg-green-500/20 text-green-300 border border-green-500/30' : score >= 40 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30';
   return <span className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${color}`}>{score}/100</span>;
+}
+
+// ── Confidence bar ────────────────────────────────────────────────────────────
+function ConfidenceBar({ value }: { value: number }) {
+  const color = value >= 70 ? 'bg-green-500' : value >= 40 ? 'bg-amber-500' : 'bg-red-500';
+  const textColor = value >= 70 ? 'text-green-300' : value >= 40 ? 'text-amber-300' : 'text-red-300';
+  return (
+    <div className="flex items-center gap-2 min-w-[120px]">
+      <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
+      </div>
+      <span className={`text-xs font-mono font-semibold ${textColor} w-8 text-left`}>{value}%</span>
+    </div>
+  );
 }
 
 // ── Source type icon ───────────────────────────────────────────────────────────
@@ -206,6 +241,7 @@ export default function AdminNexusBrief() {
   const [, navigate] = useLocation();
   const [, params] = useRoute('/admin/nexus/briefs/:id');
   const briefId = params?.id ?? '';
+  const { tt } = useAdminI18n();
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [brief, setBrief] = useState<Brief | null>(null);
@@ -251,7 +287,7 @@ export default function AdminNexusBrief() {
       );
       setCodebasePreview(data);
     } catch {
-      alert('שגיאה בטעינת preview');
+      alert(tt('שגיאה בטעינת preview'));
     } finally {
       setLoadingPreview(false);
     }
@@ -288,12 +324,47 @@ export default function AdminNexusBrief() {
       const data: { files: UploadedFile[] } = await resp.json();
       setUploadedFiles((prev) => [...prev, ...data.files]);
     } catch (err: any) {
-      alert('שגיאה בהעלאת קבצים: ' + (err.message ?? err));
+      alert(tt('שגיאה בהעלאת קבצים') + ': ' + (err.message ?? err));
     } finally {
       setUploadingFiles(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+  // ── Question Discovery handlers ───────────────────────────────────────────
+  async function handleGenerateQuestions() {
+    if (!briefId) return;
+    setQuestionsLoading(true);
+    try {
+      await apiFetch(`/admin/nexus/briefs/${briefId}/generate-questions`, { method: 'POST', body: '{}' });
+      const data = await apiFetch<{ questions: BriefQuestion[] }>(`/admin/nexus/briefs/${briefId}/questions`);
+      setQuestions(data.questions ?? []);
+    } catch { alert(tt('שגיאה ביצירת שאלות')); }
+    finally { setQuestionsLoading(false); }
+  }
+
+  async function handleAutoAnswer() {
+    if (!briefId) return;
+    setAutoAnswering(true);
+    try {
+      await apiFetch(`/admin/nexus/briefs/${briefId}/auto-answer`, { method: 'POST', body: '{}' });
+      const data = await apiFetch<{ questions: BriefQuestion[] }>(`/admin/nexus/briefs/${briefId}/questions`);
+      setQuestions(data.questions ?? []);
+    } catch { alert(tt('שגיאה במענה אוטומטי')); }
+    finally { setAutoAnswering(false); }
+  }
+
+  async function handleUpdateQuestion(qId: string, updates: Partial<BriefQuestion>) {
+    if (!briefId) return;
+    try {
+      await apiFetch(`/admin/nexus/briefs/${briefId}/questions/${qId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      });
+      setQuestions(prev => prev.map(q => q.id === qId ? { ...q, ...updates } : q));
+      if (editingQuestionId === qId) { setEditingQuestionId(null); setEditAnswer(''); }
+    } catch { alert(tt('שגיאה בעדכון')); }
+  }
+
   const [refineModal, setRefineModal] = useState(false);
   const [refineNotes, setRefineNotes] = useState('');
   const [refining, setRefining] = useState(false);
@@ -311,11 +382,21 @@ export default function AdminNexusBrief() {
   const [expandedDept, setExpandedDept] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // ── Question Discovery state ──────────────────────────────────────────────
+  const [questions, setQuestions] = useState<BriefQuestion[]>([]);
+  const [questionsLoading, setQuestionsLoading] = useState(false);
+  const [autoAnswering, setAutoAnswering] = useState(false);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [editAnswer, setEditAnswer] = useState('');
+
   // ── Reset state ───────────────────────────────────────────────────────────
   const [resetting, setResetting] = useState(false);
 
   // ── Idea prompt expand ────────────────────────────────────────────────────
   const [ideaExpanded, setIdeaExpanded] = useState(false);
+
+  // ── Client-side view mode (back/forward between wizard and results) ──────
+  const [viewMode, setViewMode] = useState<'auto' | 'wizard' | 'results'>('auto');
 
   // ── Dept configs (system prompts) ─────────────────────────────────────────
   const [deptConfigs, setDeptConfigs] = useState<Record<string, DeptConfig>>({});
@@ -363,7 +444,7 @@ export default function AdminNexusBrief() {
       setIsExistingProject(notes.startsWith('[EXISTING_PROJECT]'));
       setTargetPlatforms(data.brief.targetPlatforms ?? []);
     } catch (e) {
-      setError('לא ניתן לטעון את הניירת');
+      setError(tt('לא ניתן לטעון את הניירת'));
     } finally {
       setLoading(false);
     }
@@ -380,6 +461,13 @@ export default function AdminNexusBrief() {
     const interval = setInterval(() => void loadBrief(), 4000);
     return () => clearInterval(interval);
   }, [brief?.status, streaming, loadBrief]);
+
+  // Reset viewMode when brief transitions to draft/researching
+  useEffect(() => {
+    if (brief?.status === 'draft' || brief?.status === 'researching') {
+      setViewMode('auto');
+    }
+  }, [brief?.status]);
 
   // Load available models + phases + dept configs
   useEffect(() => {
@@ -416,6 +504,15 @@ export default function AdminNexusBrief() {
             setTaskAccepted(Object.fromEntries(tasks.map((t) => [t.id, t.accepted !== false])));
           }
         })
+        .catch(() => {});
+    }
+  }, [briefId]);
+
+  // Load existing questions
+  useEffect(() => {
+    if (briefId) {
+      apiFetch<{ questions: BriefQuestion[] }>(`/admin/nexus/briefs/${briefId}/questions`)
+        .then((d) => { if (d.questions?.length) setQuestions(d.questions); })
         .catch(() => {});
     }
   }, [briefId]);
@@ -521,8 +618,15 @@ export default function AdminNexusBrief() {
 
   // ── Launch research ────────────────────────────────────────────────────────
   const handleLaunch = async () => {
-    if (selectedDepts.length === 0) { alert('בחר לפחות מחלקה אחת'); return; }
+    if (selectedDepts.length === 0) { alert(tt('בחר לפחות מחלקה אחת')); return; }
+    // Warn about unanswered manual questions
+    const unansweredManual = questions.filter(q => q.answer_strategy === 'manual_only' && !q.answer);
+    if (unansweredManual.length > 0) {
+      const proceed = confirm(`יש ${unansweredManual.length} שאלות שדורשות מילוי ידני ועדיין לא נענו.\nלהמשיך בלי תשובות? (מומלץ למלא לפני הרצת מחקר)`);
+      if (!proceed) return;
+    }
     setLaunching(true);
+    setViewMode('auto');
     try {
       // Merge uploaded file texts into contextNotes
       let mergedNotes = (isExistingProject ? '[EXISTING_PROJECT] ' : '') + (contextNotes || '');
@@ -533,6 +637,10 @@ export default function AdminNexusBrief() {
           .join('');
         if (filesSection) mergedNotes = (mergedNotes ? mergedNotes + '\n\n' : '') + filesSection.trim();
       }
+      // If re-launching from review mode, reset to draft first
+      if (isReview) {
+        await apiFetch(`/admin/nexus/briefs/${briefId}/reset`, { method: 'POST', body: '{}' });
+      }
       await apiFetch(`/admin/nexus/briefs/${briefId}`, {
         method: 'PATCH',
         body: JSON.stringify({ selectedDepartments: selectedDepts, selectedModels, codebaseDepth, codebaseScope, contextNotes: mergedNotes || null, targetPlatforms }),
@@ -542,7 +650,7 @@ export default function AdminNexusBrief() {
       // Optimistically set status
       setBrief((b) => b ? { ...b, status: 'researching' } : b);
     } catch (e) {
-      alert('שגיאה בהפעלת המחקר');
+      alert(tt('שגיאה בהפעלת המחקר'));
     } finally {
       setLaunching(false);
     }
@@ -554,7 +662,7 @@ export default function AdminNexusBrief() {
     try {
       const data = await apiFetch<{ brief: Brief }>(`/admin/nexus/briefs/${briefId}/approve`, { method: 'POST', body: JSON.stringify({}) });
       setBrief(data.brief);
-    } catch { alert('שגיאה באישור'); }
+    } catch { alert(tt('שגיאה באישור')); }
     finally { setActionLoading(null); }
   };
 
@@ -567,7 +675,7 @@ export default function AdminNexusBrief() {
       });
       setBrief(data.brief);
       setRejectModal(false);
-    } catch { alert('שגיאה בדחייה'); }
+    } catch { alert(tt('שגיאה בדחייה')); }
     finally { setActionLoading(null); }
   };
 
@@ -580,7 +688,7 @@ export default function AdminNexusBrief() {
       });
       setBrief((b) => b ? { ...b, assembledBrief: editedContent } : b);
       setEditingBrief(false);
-    } catch { alert('שגיאה בשמירה'); }
+    } catch { alert(tt('שגיאה בשמירה')); }
     finally { setSavingEdit(false); }
   };
 
@@ -600,7 +708,7 @@ export default function AdminNexusBrief() {
       setBrief(data.brief);
       setStreaming(false);
     } catch (e: any) {
-      alert(e.message ?? 'שגיאה באיפוס הניירת');
+      alert(e.message ?? tt('שגיאה באיפוס הניירת'));
     } finally {
       setResetting(false);
     }
@@ -623,7 +731,7 @@ export default function AdminNexusBrief() {
       setDepartments(data.departments);
       setWebSources(data.webSources);
     } catch (e: any) {
-      alert(e.message ?? 'שגיאה בחידוד הניירת');
+      alert(e.message ?? tt('שגיאה בחידוד הניירת'));
     } finally {
       setRefining(false);
     }
@@ -637,7 +745,7 @@ export default function AdminNexusBrief() {
       const data = await apiFetch<{ tasks: ExtractedTask[] }>(`/admin/nexus/briefs/${briefId}/extract-tasks`, { method: 'POST', body: '{}' });
       const tasks = data.tasks ?? [];
       if (tasks.length === 0) {
-        setExtractionError('AI לא הצליח לחלץ משימות — ייתכן שהניירת קצרה מדי או שנדרש מפתח API תקין. נסה שוב.');
+        setExtractionError(tt('AI לא הצליח לחלץ משימות — ייתכן שהניירת קצרה מדי או שנדרש מפתח API תקין. נסה שוב.'));
       }
       setExtractedTasks(tasks);
       setTaskAccepted(Object.fromEntries(tasks.map((t) => [t.id, true])));
@@ -651,7 +759,7 @@ export default function AdminNexusBrief() {
             if (!next[i]?.name) {
               next[i] = {
                 name: `Sprint ${i + 1} — ${t}`,
-                goal: i === 0 ? `יישום ממצאי מחקר Nexus: ${brief.ideaPrompt.slice(0, 60)}` : '',
+                goal: i === 0 ? `${tt('יישום ממצאי מחקר Nexus')}: ${brief.ideaPrompt.slice(0, 60)}` : '',
               };
             }
           }
@@ -660,7 +768,7 @@ export default function AdminNexusBrief() {
         if (!selectedPhaseId && phases.length === 1) setSelectedPhaseId(phases[0].id);
       }
     } catch (e: any) {
-      const msg = e.message ?? 'שגיאה בחילוץ משימות';
+      const msg = e.message ?? tt('שגיאה בחילוץ משימות');
       setExtractionError(msg);
     } finally {
       setExtracting(false);
@@ -687,7 +795,7 @@ export default function AdminNexusBrief() {
       setGeneratedDocs((prev) => ({ ...prev, [docType]: data }));
       setExpandedDoc(docType);
     } catch (e: any) {
-      alert(e.message ?? 'שגיאה בייצור מסמך');
+      alert(e.message ?? tt('שגיאה בייצור מסמך'));
     } finally {
       setGeneratingDoc(null);
     }
@@ -718,7 +826,7 @@ export default function AdminNexusBrief() {
             setGeneratedDocs((prev) => ({ ...prev, [docType]: data }));
           } catch {
             // include empty placeholder so ZIP still works
-            results[docType] = { content: `שגיאה בייצור מסמך ${docType}`, docType, title: docType, tokensUsed: 0, costUsd: 0 };
+            results[docType] = { content: `${tt('שגיאה בייצור מסמך')} ${docType}`, docType, title: docType, tokensUsed: 0, costUsd: 0 };
           } finally {
             done++;
             setDownloadAllProgress(done);
@@ -728,7 +836,7 @@ export default function AdminNexusBrief() {
 
       await downloadAllDocsAsZip(results, brief.title);
     } catch (e: any) {
-      alert(e.message ?? 'שגיאה בהורדת ZIP');
+      alert(e.message ?? tt('שגיאה בהורדת ZIP'));
     } finally {
       setDownloadingAllDocs(false);
       setDownloadAllProgress(0);
@@ -751,7 +859,7 @@ export default function AdminNexusBrief() {
     const config = sprintConfigs[idx];
     const name = config?.name?.trim() || `Sprint ${idx + 1}`;
     const taskIds = group.tasks.filter((t) => taskAccepted[t.id] !== false).map((t) => t.id);
-    if (taskIds.length === 0) { alert('אין משימות מאושרות בספרינט זה'); return; }
+    if (taskIds.length === 0) { alert(tt('אין משימות מאושרות בספרינט זה')); return; }
     setCreatingSprintIdx(idx);
     try {
       const data = await apiFetch<{ sprintId: string; taskCount: number }>(`/admin/nexus/briefs/${briefId}/generate-sprint`, {
@@ -760,7 +868,7 @@ export default function AdminNexusBrief() {
       });
       setCreatedSprints((prev) => ({ ...prev, [idx]: data }));
     } catch (e: any) {
-      alert(e.message ?? 'שגיאה ביצירת ספרינט');
+      alert(e.message ?? tt('שגיאה ביצירת ספרינט'));
     } finally {
       setCreatingSprintIdx(null);
     }
@@ -771,6 +879,8 @@ export default function AdminNexusBrief() {
       if (createdSprints[group.idx]) continue;
       await handleCreateSprintGroup(group.idx);
     }
+    // Navigate to sprints page — tasks will be activated there via "Start Sprint"
+    navigate('/admin/sprints');
   };
 
   // ── Progress calculation ──────────────────────────────────────────────────
@@ -793,9 +903,9 @@ export default function AdminNexusBrief() {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3">
         <AlertCircle className="w-8 h-8 text-red-400" />
-        <p className="text-slate-400">{error ?? 'לא נמצאה הניירת'}</p>
+        <p className="text-slate-400">{error ? tt(error) : tt('לא נמצאה הניירת')}</p>
         <button onClick={() => navigate('/admin/nexus')} className="text-indigo-400 hover:text-indigo-300 text-sm">
-          חזרה לרשימה
+          {tt('חזרה לרשימה')}
         </button>
       </div>
     );
@@ -804,12 +914,19 @@ export default function AdminNexusBrief() {
   const isResearching = brief.status === 'researching' || streaming;
   const isReview = ['review', 'approved', 'rejected', 'in_progress', 'done'].includes(brief.status);
 
+  // Client-side navigation: allow toggling between wizard and results when in review
+  const showWizard = (brief.status === 'draft' && !streaming)
+    || (isReview && !isResearching && viewMode === 'wizard');
+  const showReview = isReview && !isResearching && viewMode !== 'wizard';
+  const canGoBack = isReview && !isResearching && viewMode !== 'wizard';
+  const canGoForward = isReview && !isResearching && viewMode === 'wizard';
+
   return (
-    <div className="p-6 max-w-5xl mx-auto" dir="rtl">
+    <div className="p-6 max-w-7xl mx-auto" dir="rtl">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-400 mb-5">
         <button onClick={() => navigate('/admin/nexus')} className="hover:text-slate-200 flex items-center gap-1">
-          <Cpu className="w-3.5 h-3.5" /> ניירות Nexus
+          <Cpu className="w-3.5 h-3.5" /> {tt('ניירות Nexus')}
         </button>
         <ArrowRight className="w-3.5 h-3.5 rotate-180" />
         <span className="text-slate-200 truncate max-w-xs">{brief.title}</span>
@@ -826,7 +943,7 @@ export default function AdminNexusBrief() {
                 onClick={() => setIdeaExpanded((v) => !v)}
                 className="text-xs text-indigo-400 hover:text-indigo-300 mt-0.5 font-medium"
               >
-                {ideaExpanded ? '▲ סגור' : '▼ קרא עוד'}
+                {ideaExpanded ? tt('▲ סגור') : tt('▼ קרא עוד')}
               </button>
             )}
           </div>
@@ -842,10 +959,10 @@ export default function AdminNexusBrief() {
               onClick={handleReset}
               disabled={resetting}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 text-xs font-medium transition-colors"
-              title="המחקר תקוע? אפס לטיוטה"
+              title={tt('המחקר תקוע? אפס לטיוטה')}
             >
               {resetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-              אפס מחקר
+              {tt('אפס מחקר')}
             </button>
           )}
           <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
@@ -855,25 +972,52 @@ export default function AdminNexusBrief() {
             brief.status === 'researching' ? 'bg-blue-600 text-white' :
             'bg-slate-600 text-slate-200'
           }`}>
-            {brief.status === 'draft' ? 'טיוטה' : brief.status === 'researching' ? 'חוקר...' :
-             brief.status === 'review' ? 'בסקירה' : brief.status === 'approved' ? 'אושר' :
-             brief.status === 'rejected' ? 'נדחה' : brief.status}
+            {brief.status === 'draft' ? tt('טיוטה') : brief.status === 'researching' ? tt('חוקר...') :
+             brief.status === 'review' ? tt('בסקירה') : brief.status === 'approved' ? tt('אושר') :
+             brief.status === 'rejected' ? tt('נדחה') : brief.status}
           </span>
         </div>
       </div>
 
+      {/* ═══════════════════ Back / Forward navigation ═══════════════════ */}
+      {isReview && !isResearching && (
+        <div className="flex items-center gap-3 mb-4">
+          {canGoBack && (
+            <button
+              onClick={() => setViewMode('wizard')}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-600 bg-slate-800 text-slate-200 hover:border-indigo-500 hover:bg-slate-700 text-sm font-medium transition-colors"
+            >
+              <ArrowRight className="w-4 h-4" />
+              {tt('הקודם — הגדרות')}
+            </button>
+          )}
+          {canGoForward && (
+            <>
+              <button
+                onClick={() => setViewMode('auto')}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-500 text-sm font-medium transition-colors"
+              >
+                {tt('הבא — תוצאות')}
+                <ArrowRight className="w-4 h-4 rotate-180" />
+              </button>
+              <span className="text-xs text-slate-500">{tt('שנה הגדרות ולחץ "הפעל מחקר" להרצה מחדש')}</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ════════════════════════════════════════════════════════
-          WIZARD MODE (draft)
+          WIZARD MODE (draft or back-from-review)
           ════════════════════════════════════════════════════════ */}
-      {brief.status === 'draft' && !streaming && (
+      {showWizard && (
         <div className="space-y-5">
           {/* Step 1: Department selection */}
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-sm flex items-center justify-center font-bold">1</span>
-              בחר מחלקות לחקור
+              {tt('בחר מחלקות לחקור')}
             </h2>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {ALL_DEPARTMENTS.map((dept) => {
                 const active = selectedDepts.includes(dept.id);
                 return (
@@ -892,7 +1036,7 @@ export default function AdminNexusBrief() {
                   >
                     <span className="text-2xl">{dept.emoji}</span>
                     <span className="text-sm font-semibold leading-tight">{dept.hebrewName}</span>
-                    <span className="text-xs admin-muted leading-tight">{dept.description}</span>
+                    <span className="text-xs admin-muted leading-tight">{tt(dept.description)}</span>
                   </button>
                 );
               })}
@@ -902,13 +1046,13 @@ export default function AdminNexusBrief() {
                 onClick={() => setSelectedDepts(ALL_DEPARTMENTS.map((d) => d.id))}
                 className="text-sm text-indigo-400 hover:text-indigo-300 font-medium"
               >
-                בחר הכל
+                {tt('בחר הכל')}
               </button>
               <span className="text-slate-600">|</span>
               <button onClick={() => setSelectedDepts([])} className="text-sm admin-muted hover:text-slate-300">
-                נקה
+                {tt('נקה')}
               </button>
-              <span className="text-sm admin-muted mr-auto font-medium">{selectedDepts.length} מחלקות נבחרו</span>
+              <span className="text-sm admin-muted mr-auto font-medium">{selectedDepts.length} {tt('מחלקות נבחרו')}</span>
             </div>
           </div>
 
@@ -917,7 +1061,7 @@ export default function AdminNexusBrief() {
             <div className="admin-card">
               <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
                 <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-sm flex items-center justify-center font-bold">2</span>
-                מודל AI (בחר עד 2)
+                {tt('מודל AI (בחר עד 2)')}
               </h2>
               <div className="flex flex-wrap gap-3">
                 {availableModels.filter((m) => m.available).map((model) => {
@@ -946,7 +1090,7 @@ export default function AdminNexusBrief() {
                 })}
               </div>
               {selectedModels.length === 0 && (
-                <p className="text-sm admin-muted mt-3">ברירת מחדל: Claude (מומלץ)</p>
+                <p className="text-sm admin-muted mt-3">{tt('ברירת מחדל: Claude (מומלץ)')}</p>
               )}
             </div>
           )}
@@ -955,11 +1099,11 @@ export default function AdminNexusBrief() {
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-sm flex items-center justify-center font-bold">3</span>
-              הקשר קוד הפרויקט
+              {tt('הקשר קוד הפרויקט')}
             </h2>
             <div className="flex gap-5">
               <div className="flex-1">
-                <label className="block text-sm admin-muted mb-2 font-medium">עומק סריקה</label>
+                <label className="block text-sm admin-muted mb-2 font-medium">{tt('עומק סריקה')}</label>
                 <div className="flex gap-2">
                   {DEPTH_OPTIONS.map((d) => (
                     <button
@@ -971,14 +1115,14 @@ export default function AdminNexusBrief() {
                           : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'
                       }`}
                     >
-                      <span className="font-semibold block">{d.label}</span>
-                      <span className="text-xs admin-muted">{d.desc}</span>
+                      <span className="font-semibold block">{tt(d.label)}</span>
+                      <span className="text-xs admin-muted">{tt(d.desc)}</span>
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="block text-sm admin-muted mb-2 font-medium">טווח</label>
+                <label className="block text-sm admin-muted mb-2 font-medium">{tt('טווח')}</label>
                 <div className="flex flex-col gap-2">
                   {SCOPE_OPTIONS.map((s) => (
                     <button
@@ -990,7 +1134,7 @@ export default function AdminNexusBrief() {
                           : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'
                       }`}
                     >
-                      {s.label}
+                      {tt(s.label)}
                     </button>
                   ))}
                 </div>
@@ -1005,10 +1149,10 @@ export default function AdminNexusBrief() {
                 disabled={loadingPreview}
                 className="text-xs px-3 py-1.5 rounded-lg border border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
-                {loadingPreview ? '⏳ סורק...' : '👁 תצוגה מקדימה של מה שייסרק'}
+                {loadingPreview ? tt('⏳ סורק...') : tt('👁 תצוגה מקדימה של מה שייסרק')}
               </button>
               {codebasePreview && (
-                <span className="text-xs text-slate-500">{codebasePreview.lines.toLocaleString()} שורות | {Math.round(codebasePreview.chars / 1024)}KB</span>
+                <span className="text-xs text-slate-500">{codebasePreview.lines.toLocaleString()} {tt('שורות')} | {Math.round(codebasePreview.chars / 1024)}KB</span>
               )}
             </div>
             {codebasePreview && (
@@ -1029,8 +1173,8 @@ export default function AdminNexusBrief() {
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-3 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-slate-600 text-white text-sm flex items-center justify-center font-bold">4</span>
-              פלטפורמות יעד
-              <span className="text-xs text-slate-500 font-normal mr-1">(בחר לפחות אחת)</span>
+              {tt('פלטפורמות יעד')}
+              <span className="text-xs text-slate-500 font-normal mr-1">({tt('בחר לפחות אחת')})</span>
             </h2>
 
             {/* Existing project toggle */}
@@ -1040,11 +1184,11 @@ export default function AdminNexusBrief() {
                 : 'border-slate-700/50 bg-slate-800/30'
             }`}>
               <div>
-                <p className="text-sm font-semibold text-slate-200">🏗️ פרויקט קיים</p>
+                <p className="text-sm font-semibold text-slate-200">{tt('🏗️ פרויקט קיים')}</p>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {isExistingProject
-                    ? 'Claude יסרוק את כל הקבצים והספריות — משימות יכילו נתיבים אמיתיים מהcodebase'
-                    : 'מפתחים על מוצר קיים? הפעל כדי שהמחקר יתבסס על הקוד הקיים'}
+                    ? tt('Claude יסרוק את כל הקבצים והספריות — משימות יכילו נתיבים אמיתיים מהcodebase')
+                    : tt('מפתחים על מוצר קיים? הפעל כדי שהמחקר יתבסס על הקוד הקיים')}
                 </p>
               </div>
               <button
@@ -1056,7 +1200,7 @@ export default function AdminNexusBrief() {
                     : 'border-slate-600 text-slate-400 hover:border-amber-500/50 hover:text-slate-300'
                 }`}
               >
-                {isExistingProject ? '✓ פעיל' : 'הפעל'}
+                {isExistingProject ? tt('✓ פעיל') : tt('הפעל')}
               </button>
             </div>
 
@@ -1078,7 +1222,7 @@ export default function AdminNexusBrief() {
             </div>
             {targetPlatforms.length > 0 && (
               <p className="text-xs text-indigo-400 mt-2 flex items-center gap-1">
-                <span>🖥️</span> כל ה-agents יידעו לחקור בהקשר של: {targetPlatforms.join(', ')}
+                <span>🖥️</span> {tt('כל ה-agents יידעו לחקור בהקשר של')}: {targetPlatforms.join(', ')}
               </p>
             )}
           </div>
@@ -1087,8 +1231,8 @@ export default function AdminNexusBrief() {
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-3 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-slate-600 text-white text-sm flex items-center justify-center font-bold">5</span>
-              העלאת מסמכים
-              <span className="text-xs text-slate-500 font-normal mr-1">(אופציונלי) — PDF, Word, TXT, MD, תמונות</span>
+              {tt('העלאת מסמכים')}
+              <span className="text-xs text-slate-500 font-normal mr-1">({tt('אופציונלי')}) — PDF, Word, TXT, MD, {tt('תמונות')}</span>
             </h2>
 
             {/* Drop zone */}
@@ -1108,13 +1252,13 @@ export default function AdminNexusBrief() {
               {uploadingFiles ? (
                 <div className="flex items-center justify-center gap-2 text-indigo-400">
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm">מחלץ טקסט מהקבצים...</span>
+                  <span className="text-sm">{tt('מחלץ טקסט מהקבצים...')}</span>
                 </div>
               ) : (
                 <div className="text-slate-400">
                   <FileText className="w-8 h-8 mx-auto mb-2 text-slate-500" />
-                  <p className="text-sm font-medium text-slate-300">גרור קבצים לכאן או לחץ להעלאה</p>
-                  <p className="text-xs mt-1">PDF · Word (.docx) · TXT · MD · PNG · JPG · WebP · עד 20MB לקובץ</p>
+                  <p className="text-sm font-medium text-slate-300">{tt('גרור קבצים לכאן או לחץ להעלאה')}</p>
+                  <p className="text-xs mt-1">PDF · Word (.docx) · TXT · MD · PNG · JPG · WebP · {tt('עד 20MB לקובץ')}</p>
                 </div>
               )}
             </div>
@@ -1137,7 +1281,7 @@ export default function AdminNexusBrief() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-100 truncate">{f.filename}</p>
-                      <p className="text-xs text-slate-400">{f.type} · {f.chars.toLocaleString()} תווים</p>
+                      <p className="text-xs text-slate-400">{f.type} · {f.chars.toLocaleString()} {tt('תווים')}</p>
                     </div>
                     <button
                       onClick={() => setUploadedFiles((prev) => prev.filter((_, idx) => idx !== i))}
@@ -1148,7 +1292,7 @@ export default function AdminNexusBrief() {
                   </div>
                 ))}
                 <p className="text-xs text-green-400 flex items-center gap-1">
-                  <span>✅</span> {uploadedFiles.length} קבצים יוזרקו כהקשר לכל ה-agents
+                  <span>✅</span> {uploadedFiles.length} {tt('קבצים יוזרקו כהקשר לכל ה-agents')}
                 </p>
               </div>
             )}
@@ -1158,8 +1302,8 @@ export default function AdminNexusBrief() {
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-3 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-slate-600 text-white text-sm flex items-center justify-center font-bold">6</span>
-              הקשר / הבהרות לAgents
-              <span className="text-xs text-slate-500 font-normal mr-1">(אופציונלי)</span>
+              {tt('הקשר / הבהרות לAgents')}
+              <span className="text-xs text-slate-500 font-normal mr-1">({tt('אופציונלי')})</span>
             </h2>
             <textarea
               value={contextNotes}
@@ -1171,10 +1315,174 @@ export default function AdminNexusBrief() {
             />
             {contextNotes && (
               <p className="text-xs text-indigo-400 mt-1.5 flex items-center gap-1">
-                <span>⚡</span> הוראות אלו יוזרקו לכל 10 ה-agents לפני הניתוח
+                <span>⚡</span> {tt('הוראות אלו יוזרקו לכל 13 ה-agents לפני הניתוח')}
               </p>
             )}
           </div>
+
+          {/* Step 7: Question Discovery */}
+          <div className="admin-card">
+            <h2 className="text-base font-semibold text-slate-100 mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-slate-600 text-white text-sm flex items-center justify-center font-bold">7</span>
+              {tt('גילוי שאלות (Question Discovery)')}
+              <span className="text-xs text-slate-500 font-normal mr-1">({tt('אופציונלי — מומלץ')})</span>
+            </h2>
+            <p className="text-xs text-slate-400 mb-3">
+              {tt('יוצר שאלות חכמות לפי המחלקות שנבחרו, עונה עליהן אוטומטית מ-codebase ו-AI, ומשפר את איכות המחקר.')}
+            </p>
+
+            {questions.length === 0 ? (
+              <button
+                onClick={handleGenerateQuestions}
+                disabled={questionsLoading || selectedDepts.length === 0}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                {questionsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
+                {tt('גלה שאלות')} ({selectedDepts.length} {tt('מחלקות')})
+              </button>
+            ) : (
+              <div className="space-y-4">
+                {/* Action bar */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={handleAutoAnswer}
+                    disabled={autoAnswering}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    {autoAnswering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    {tt('מענה אוטומטי')}
+                  </button>
+                  <button
+                    onClick={handleGenerateQuestions}
+                    disabled={questionsLoading}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm transition-colors"
+                  >
+                    {questionsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                    {tt('חדש שאלות')}
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    {questions.length} {tt('שאלות')} | {questions.filter(q => q.verified).length} {tt('מאומתות')} | {questions.filter(q => q.answer).length} {tt('עם תשובה')}
+                  </span>
+                </div>
+
+                {/* Manual-only questions alert */}
+                {(() => {
+                  const manualPending = questions.filter(q => q.answer_strategy === 'manual_only' && !q.answer);
+                  if (manualPending.length === 0) return null;
+                  return (
+                    <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-950/40 border border-amber-700/50">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-amber-300" dir="rtl">
+                          {manualPending.length} {tt('שאלות דורשות מילוי ידני על ידי אדמין')}
+                        </p>
+                        <p className="text-xs text-amber-400/70 mt-0.5" dir="rtl">
+                          {tt('שאלות אלו לא ייענו אוטומטית — לחץ על עריכה כדי לענות עליהן לפני הפעלת המחקר')}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Questions grouped by department */}
+                {Object.entries(
+                  questions.reduce<Record<string, BriefQuestion[]>>((acc, q) => {
+                    (acc[q.department] ??= []).push(q);
+                    return acc;
+                  }, {})
+                ).map(([dept, deptQuestions]) => {
+                  const deptInfo = ALL_DEPARTMENTS.find(d => d.id === dept);
+                  return (
+                    <div key={dept} className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden">
+                      <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border-b border-slate-700">
+                        <span className="text-base">{deptInfo?.emoji ?? '📁'}</span>
+                        <span className="text-sm font-semibold text-slate-200">{deptInfo?.hebrewName ?? dept}</span>
+                        <span className="text-xs text-slate-500 mr-auto">{deptQuestions.length} {tt('שאלות')}</span>
+                      </div>
+                      <div className="divide-y divide-slate-700/50">
+                        {deptQuestions.map((q) => (
+                          <div key={q.id} className={`px-3 py-2.5 space-y-1.5 ${q.answer_strategy === 'manual_only' && !q.answer ? 'bg-amber-950/20' : ''}`}>
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                  {q.answer_strategy === 'manual_only' && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/50 text-amber-300 border border-amber-700/40">
+                                      <AlertCircle className="w-2.5 h-2.5" />
+                                      {tt('ידני')}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-slate-200" dir="rtl">{q.question}</p>
+                                {q.gate && (
+                                  <span className="text-[10px] text-slate-500 font-mono">{q.gate}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <ConfidenceBar value={q.confidence} />
+                                <button
+                                  onClick={() => handleUpdateQuestion(q.id, { verified: !q.verified })}
+                                  className={`p-1 rounded transition-colors ${q.verified ? 'text-green-400 hover:text-green-300' : 'text-slate-500 hover:text-slate-300'}`}
+                                  title={q.verified ? tt('מאומת') : tt('לא מאומת')}
+                                >
+                                  {q.verified ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+                                </button>
+                              </div>
+                            </div>
+                            {/* Answer */}
+                            {editingQuestionId === q.id ? (
+                              <div className="flex gap-2 items-end">
+                                <textarea
+                                  value={editAnswer}
+                                  onChange={(e) => setEditAnswer(e.target.value)}
+                                  rows={2}
+                                  className="flex-1 px-2.5 py-1.5 rounded bg-slate-900 border border-slate-600 text-slate-200 text-xs resize-none focus:outline-none focus:border-indigo-500"
+                                  dir="rtl"
+                                  autoFocus
+                                />
+                                <button onClick={() => handleUpdateQuestion(q.id, { answer: editAnswer })} className="px-2 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-xs">{tt('שמור')}</button>
+                                <button onClick={() => { setEditingQuestionId(null); setEditAnswer(''); }} className="px-2 py-1 rounded bg-slate-700 text-slate-300 text-xs">{tt('בטל')}</button>
+                              </div>
+                            ) : (
+                              <div className="flex items-start gap-2">
+                                {q.answer ? (
+                                  <p className="text-xs text-slate-400 flex-1 leading-relaxed" dir="rtl">{q.answer}</p>
+                                ) : q.answer_strategy === 'manual_only' ? (
+                                  <p className="text-xs text-amber-500/70 italic flex-1" dir="rtl">⚠ {tt('נדרש מילוי ידני — לחץ על עריכה')}</p>
+                                ) : (
+                                  <p className="text-xs text-slate-600 italic flex-1">{tt('ללא תשובה')}</p>
+                                )}
+                                <button
+                                  onClick={() => { setEditingQuestionId(q.id); setEditAnswer(q.answer ?? ''); }}
+                                  className="p-0.5 text-slate-500 hover:text-slate-300 shrink-0"
+                                  title={tt('ערוך תשובה')}
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                            {q.answerSource && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <span>{tt('מקור')}: {q.answerSource}</span>
+                                {q.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline truncate max-w-[200px]">{q.sourceUrl}</a>}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Cost estimate */}
+          {selectedDepts.length > 0 && (
+            <div className="text-xs text-slate-500 text-center mb-2">
+              {tt('עלות משוערת')}: ~${(selectedDepts.length * 1.5).toFixed(0)}-${(selectedDepts.length * 2.2).toFixed(0)} USD
+              ({selectedDepts.length} {tt('מחלקות')} × {selectedModels.includes('claude') || selectedModels.length === 0 ? 'Claude Sonnet' : selectedModels[0]})
+            </div>
+          )}
 
           {/* Launch button */}
           <button
@@ -1183,7 +1491,7 @@ export default function AdminNexusBrief() {
             className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-base transition-all shadow-lg shadow-indigo-500/20"
           >
             {launching ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-            הפעל מחקר Nexus ({selectedDepts.length} מחלקות)
+            {tt('הפעל מחקר Nexus')} ({selectedDepts.length} {tt('מחלקות')})
           </button>
         </div>
       )}
@@ -1198,7 +1506,7 @@ export default function AdminNexusBrief() {
             <div className="flex items-center justify-between mb-4">
               <span className="text-base font-semibold text-slate-100 flex items-center gap-2">
                 <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-                מחקר Nexus בתהליך...
+                {tt('מחקר Nexus בתהליך...')}
               </span>
               <span className="text-lg font-mono font-bold text-indigo-300">{Math.round(progress)}%</span>
             </div>
@@ -1211,11 +1519,11 @@ export default function AdminNexusBrief() {
             <div className="grid grid-cols-3 gap-3">
               <div className="text-center">
                 <p className="text-lg font-bold text-green-400">${liveCost.toFixed(4)}</p>
-                <p className="text-xs admin-muted">עלות צבורה</p>
+                <p className="text-xs admin-muted">{tt('עלות צבורה')}</p>
               </div>
               <div className="text-center">
                 <p className="text-lg font-bold text-slate-100">{completedDepts}/{totalDepts}</p>
-                <p className="text-xs admin-muted">מחלקות הושלמו</p>
+                <p className="text-xs admin-muted">{tt('מחלקות הושלמו')}</p>
               </div>
               <div className="text-center">
                 <p className="text-lg font-bold text-indigo-300">{liveTokens.toLocaleString()}</p>
@@ -1229,7 +1537,7 @@ export default function AdminNexusBrief() {
             <div className="admin-card">
               <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2 mb-4">
                 <Globe className="w-5 h-5 text-blue-400" />
-                אינטליגנציה מהרשת {!webDone && <Loader2 className="w-4 h-4 animate-spin text-blue-400" />}
+                {tt('אינטליגנציה מהרשת')} {!webDone && <Loader2 className="w-4 h-4 animate-spin text-blue-400" />}
                 {webDone && <CheckCircle className="w-4 h-4 text-green-400" />}
               </h3>
               {liveTopSources.length > 0 && (
@@ -1247,7 +1555,7 @@ export default function AdminNexusBrief() {
           )}
 
           {/* Department grid */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 lg:grid-cols-4 gap-3">
             {ALL_DEPARTMENTS.filter((d) => brief.selectedDepartments.includes(d.id) || Object.keys(deptLiveStatus).includes(d.id)).map((dept) => {
               const status = deptLiveStatus[dept.id] ?? 'pending';
               return (
@@ -1285,7 +1593,7 @@ export default function AdminNexusBrief() {
           {assemblyDone && (
             <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/30 text-green-300 text-sm flex items-center gap-2">
               <CheckCircle className="w-4 h-4" />
-              הניירת הואמרה בהצלחה! טוען...
+              {tt('הניירת הואמרה בהצלחה! טוען...')}
             </div>
           )}
 
@@ -1294,7 +1602,7 @@ export default function AdminNexusBrief() {
               <AlertCircle className="w-4 h-4 inline ml-2" />
               {streamError}
               <button onClick={handleLaunch} className="text-indigo-400 hover:text-indigo-300 mr-3 text-xs">
-                נסה שוב
+                {tt('נסה שוב')}
               </button>
             </div>
           )}
@@ -1304,32 +1612,32 @@ export default function AdminNexusBrief() {
       {/* ════════════════════════════════════════════════════════
           REVIEW MODE
           ════════════════════════════════════════════════════════ */}
-      {isReview && !isResearching && brief.assembledBrief && (
+      {showReview && brief.assembledBrief && (
         <div className="space-y-5">
           {/* Action bar (only for 'review' status) */}
           {brief.status === 'review' && (
             <div className="flex items-center gap-3 p-5 rounded-xl border border-amber-500/40 bg-amber-500/8">
               <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
-              <span className="text-base text-amber-200 flex-1 font-medium">הניירת מוכנה לסקירה. עיין בתוכן ואשר / ערוך / דחה.</span>
+              <span className="text-base text-amber-200 flex-1 font-medium">{tt('הניירת מוכנה לסקירה. עיין בתוכן ואשר / ערוך / דחה.')}</span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => { setRefineNotes(brief.contextNotes ?? ''); setRefineModal(true); }}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 text-sm font-medium transition-colors"
-                  title="הוסף הוראות וחזור לחקור מחדש"
+                  title={tt('הוסף הוראות וחזור לחקור מחדש')}
                 >
-                  🔁 חדד וחקור שוב
+                  {tt('🔁 חדד וחקור שוב')}
                 </button>
                 <button
                   onClick={() => { setEditingBrief(true); setEditedContent(brief.assembledBrief ?? ''); }}
                   className="admin-btn-secondary flex items-center gap-2"
                 >
-                  <Edit3 className="w-4 h-4" /> ערוך
+                  <Edit3 className="w-4 h-4" /> {tt('ערוך')}
                 </button>
                 <button
                   onClick={() => setRejectModal(true)}
                   className="admin-btn-danger flex items-center gap-2"
                 >
-                  <ThumbsDown className="w-4 h-4" /> דחה
+                  <ThumbsDown className="w-4 h-4" /> {tt('דחה')}
                 </button>
                 <button
                   onClick={handleApprove}
@@ -1337,7 +1645,7 @@ export default function AdminNexusBrief() {
                   className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-semibold transition-colors"
                 >
                   {actionLoading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ThumbsUp className="w-4 h-4" />}
-                  אשר ניירת
+                  {tt('אשר ניירת')}
                 </button>
               </div>
             </div>
@@ -1346,7 +1654,7 @@ export default function AdminNexusBrief() {
           {brief.status === 'approved' && (
             <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/40 text-green-300 flex items-center gap-4">
               <CheckCircle className="w-5 h-5 shrink-0" />
-              <span className="text-base font-medium flex-1">הניירת אושרה ב-{brief.approvedAt ? new Date(brief.approvedAt).toLocaleDateString('he-IL') : '—'}</span>
+              <span className="text-base font-medium flex-1">{tt('הניירת אושרה ב-')}{brief.approvedAt ? new Date(brief.approvedAt).toLocaleDateString('he-IL') : '—'}</span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/admin/dev/kanban')}
@@ -1371,7 +1679,7 @@ export default function AdminNexusBrief() {
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
                   <span className="w-7 h-7 rounded-full bg-purple-600 text-white text-sm flex items-center justify-center font-bold">4</span>
-                  חלץ משימות וצור Sprints
+                  {tt('חלץ משימות וצור Sprints')}
                 </h2>
                 <div className="flex items-center gap-2">
                   {extractedTasks && extractedTasks.length > 0 && Object.keys(createdSprints).length === 0 && (
@@ -1380,7 +1688,7 @@ export default function AdminNexusBrief() {
                       disabled={creatingSprintIdx !== null}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs transition-colors disabled:opacity-50"
                     >
-                      <Zap className="w-3.5 h-3.5" /> צור את כל הספרינטים
+                      <Zap className="w-3.5 h-3.5" /> {tt('חלץ ספרינטים')}
                     </button>
                   )}
                   <button
@@ -1389,8 +1697,8 @@ export default function AdminNexusBrief() {
                     className="admin-btn-primary flex items-center gap-2"
                   >
                     {extracting
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> מחלץ... (1-3 דק׳)</>
-                      : <><Sparkles className="w-4 h-4" /> {extractedTasks && extractedTasks.length > 0 ? 'חלץ מחדש' : 'חלץ משימות'}</>
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> {tt('מחלץ...')} (1-3 {tt('דק׳')})</>
+                      : <><Sparkles className="w-4 h-4" /> {extractedTasks && extractedTasks.length > 0 ? tt('חלץ מחדש') : tt('חלץ משימות')}</>
                     }
                   </button>
                 </div>
@@ -1399,13 +1707,13 @@ export default function AdminNexusBrief() {
               {/* Phase selector — shared across all sprints (hidden when no phases defined) */}
               {extractedTasks && extractedTasks.length > 0 && phases.length > 0 && (
                 <div className="flex items-center gap-3">
-                  <label className="text-xs text-slate-400 shrink-0">Phase לכל הספרינטים (אופציונלי):</label>
+                  <label className="text-xs text-slate-400 shrink-0">{tt('Phase לכל הספרינטים (אופציונלי)')}:</label>
                   <select
                     value={selectedPhaseId ?? ''}
                     onChange={(e) => setSelectedPhaseId(e.target.value || null)}
                     className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 text-sm focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="">ללא Phase</option>
+                    <option value="">{tt('ללא Phase')}</option>
                     {phases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
@@ -1416,7 +1724,7 @@ export default function AdminNexusBrief() {
                 <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-2">
                   <span className="text-red-400 text-lg leading-none shrink-0">⚠️</span>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-red-300 mb-0.5">שגיאה בחילוץ משימות</p>
+                    <p className="text-sm font-semibold text-red-300 mb-0.5">{tt('שגיאה בחילוץ משימות')}</p>
                     <p className="text-xs text-red-400">{extractionError}</p>
                   </div>
                   <button onClick={() => setExtractionError(null)} className="text-red-500 hover:text-red-300 text-xs shrink-0">✕</button>
@@ -1425,13 +1733,13 @@ export default function AdminNexusBrief() {
 
               {/* Empty state */}
               {(!extractedTasks || extractedTasks.length === 0) && !extracting && !extractionError && (
-                <p className="text-sm admin-muted">לחץ "חלץ משימות" כדי לנתח את הניירת ולהפיק משימות לפיתוח.</p>
+                <p className="text-sm admin-muted">{tt('לחץ "חלץ משימות" כדי לנתח את הניירת ולהפיק משימות לפיתוח.')}</p>
               )}
 
               {/* Tasks-per-sprint control */}
               {extractedTasks && extractedTasks.length > 0 && (
                 <div className="flex items-center gap-3 flex-wrap">
-                  <label className="text-xs text-slate-400 shrink-0">משימות לספרינט:</label>
+                  <label className="text-xs text-slate-400 shrink-0">{tt('משימות לספרינט')}:</label>
                   <input
                     type="number"
                     min={3}
@@ -1441,7 +1749,7 @@ export default function AdminNexusBrief() {
                     className="w-16 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-sm text-center focus:outline-none focus:border-indigo-500"
                   />
                   <span className="text-xs text-slate-500">
-                    → {dynamicSprintGroups.length} ספרינטים מתוך {extractedTasks.length} משימות
+                    → {dynamicSprintGroups.length} {tt('ספרינטים')} {tt('מתוך')} {extractedTasks.length} {tt('משימות')}
                   </span>
                 </div>
               )}
@@ -1464,10 +1772,10 @@ export default function AdminNexusBrief() {
                   <div key={idx} className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 overflow-hidden">
                     {/* Header */}
                     <div className="px-4 py-2.5 flex items-center gap-2 bg-slate-800/50 border-b border-slate-700/50">
-                      <span className="text-sm font-semibold text-slate-100">ספרינט {idx + 1}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${badgeClass}`}>{groupTasks.length} משימות</span>
+                      <span className="text-sm font-semibold text-slate-100">{tt('ספרינט')} {idx + 1}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${badgeClass}`}>{groupTasks.length} {tt('משימות')}</span>
                       {acceptedCount < groupTasks.length && (
-                        <span className="text-xs text-slate-400">{acceptedCount} נבחרו</span>
+                        <span className="text-xs text-slate-400">{acceptedCount} {tt('נבחרו')}</span>
                       )}
                       {created && <CheckCircle className="w-4 h-4 text-green-400 mr-auto" />}
                     </div>
@@ -1512,7 +1820,7 @@ export default function AdminNexusBrief() {
                     {created ? (
                       <div className="px-4 py-3 bg-green-500/10 border-t border-green-500/20 flex items-center gap-3">
                         <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
-                        <span className="text-sm text-green-300">Sprint נוצר בהצלחה — {created.taskCount} משימות</span>
+                        <span className="text-sm text-green-300">{tt('Sprint נוצר בהצלחה')} — {created.taskCount} {tt('משימות')}</span>
                       </div>
                     ) : (
                       <div className="px-4 py-3 bg-slate-800/40 border-t border-slate-700/40 space-y-2">
@@ -1520,14 +1828,14 @@ export default function AdminNexusBrief() {
                           <input
                             value={config.name}
                             onChange={(e) => setSprintConfigs((prev) => ({ ...prev, [idx]: { ...prev[idx], name: e.target.value } }))}
-                            placeholder={`שם Sprint ${idx + 1}`}
+                            placeholder={`${tt('שם')} Sprint ${idx + 1}`}
                             className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
                             dir="rtl"
                           />
                           <input
                             value={config.goal}
                             onChange={(e) => setSprintConfigs((prev) => ({ ...prev, [idx]: { ...prev[idx], goal: e.target.value } }))}
-                            placeholder="מטרת Sprint (אופציונלי)"
+                            placeholder={tt('מטרת Sprint (אופציונלי)')}
                             className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
                             dir="rtl"
                           />
@@ -1538,8 +1846,8 @@ export default function AdminNexusBrief() {
                           className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-300 text-sm transition-colors disabled:opacity-50"
                         >
                           {isCreating
-                            ? <><Loader2 className="w-4 h-4 animate-spin" /> יוצר Sprint...</>
-                            : <><Zap className="w-4 h-4" /> צור Sprint ({acceptedCount} משימות)</>
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {tt('יוצר Sprint...')}</>
+                            : <><Zap className="w-4 h-4" /> {tt('צור Sprint')} ({acceptedCount} {tt('משימות')})</>
                           }
                         </button>
                       </div>
@@ -1552,10 +1860,10 @@ export default function AdminNexusBrief() {
               {Object.keys(createdSprints).length > 0 && (
                 <div className="flex items-center gap-3 pt-2">
                   <button onClick={() => navigate('/admin/sprints')} className="admin-btn-secondary flex items-center gap-2 text-sm">
-                    <Zap className="w-4 h-4" /> פתח Sprints
+                    <Zap className="w-4 h-4" /> {tt('פתח Sprints')}
                   </button>
                   <button onClick={() => navigate('/admin/dev/kanban')} className="admin-btn-secondary flex items-center gap-2 text-sm">
-                    <ListChecks className="w-4 h-4" /> פתח Kanban
+                    <ListChecks className="w-4 h-4" /> {tt('פתח Kanban')}
                   </button>
                 </div>
               )}
@@ -1565,14 +1873,14 @@ export default function AdminNexusBrief() {
           {brief.status === 'rejected' && (
             <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/40 text-red-300 flex items-start gap-3">
               <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
-              <span className="text-base">הניירת נדחתה{brief.reviewNotes ? `: ${brief.reviewNotes}` : ''}</span>
+              <span className="text-base">{tt('הניירת נדחתה')}{brief.reviewNotes ? `: ${brief.reviewNotes}` : ''}</span>
             </div>
           )}
 
           {/* Download bar */}
           <div className="flex items-center gap-3 flex-wrap">
             <button onClick={handleCopy} className="admin-btn-secondary flex items-center gap-2 text-sm">
-              <Copy className="w-4 h-4" /> {copied ? 'הועתק!' : 'העתק ל-Cursor'}
+              <Copy className="w-4 h-4" /> {copied ? tt('הועתק!') : tt('העתק ל-Cursor')}
             </button>
             <button
               onClick={() => downloadAsPdf(brief.assembledBrief!, { title: brief.title, model: brief.selectedModels.join(', '), tokens: brief.totalTokensUsed, cost: Number(brief.totalCostUsd), date: new Date().toLocaleString('he-IL') })}
@@ -1601,10 +1909,10 @@ export default function AdminNexusBrief() {
                 dir="rtl"
               />
               <div className="flex gap-3 p-4 bg-slate-800 border-t border-slate-600">
-                <button onClick={() => setEditingBrief(false)} className="admin-btn-secondary">ביטול</button>
+                <button onClick={() => setEditingBrief(false)} className="admin-btn-secondary">{tt('ביטול')}</button>
                 <button onClick={handleSaveEdit} disabled={savingEdit} className="admin-btn-primary">
                   {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  שמור שינויים
+                  {tt('שמור שינויים')}
                 </button>
               </div>
             </div>
@@ -1614,15 +1922,15 @@ export default function AdminNexusBrief() {
               <div className="flex flex-wrap gap-3 mb-4 pb-4 border-b border-slate-700">
                 <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />
-                  Claude / Gemini — ניתוח וסינתזה
+                  {tt('Claude / Gemini — ניתוח וסינתזה')}
                 </span>
                 <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
-                  Perplexity Sonar — חיפוש רשת (רקע בלבד)
+                  {tt('Perplexity Sonar — חיפוש רשת (רקע בלבד)')}
                 </span>
                 <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-                  Claude Haiku — כותרת חכמה
+                  {tt('Claude Haiku — כותרת חכמה')}
                 </span>
               </div>
 
@@ -1632,7 +1940,7 @@ export default function AdminNexusBrief() {
                   onClick={() => setActiveTab('summary')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${activeTab === 'summary' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
                 >
-                  📋 סיכום
+                  📋 {tt('סיכום')}
                 </button>
                 {departments.map((d) => {
                   const dept = ALL_DEPARTMENTS.find((x) => x.id === d.department);
@@ -1661,22 +1969,22 @@ export default function AdminNexusBrief() {
               {activeTab === 'summary' && (
                 <div>
                   {/* Meta stats */}
-                  <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                     <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">מחלקות שחקרו</p>
+                      <p className="text-xs text-slate-400 mb-1">{tt('מחלקות שחקרו')}</p>
                       <p className="text-lg font-bold text-slate-100">{departments.filter(d => !d.errorMessage).length}/{departments.length}</p>
                     </div>
                     <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">עלות כוללת</p>
+                      <p className="text-xs text-slate-400 mb-1">{tt('עלות כוללת')}</p>
                       <p className="text-lg font-bold text-slate-100">${Number(brief.totalCostUsd).toFixed(4)}</p>
                     </div>
                     <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">Tokens בשימוש</p>
+                      <p className="text-xs text-slate-400 mb-1">{tt('Tokens בשימוש')}</p>
                       <p className="text-lg font-bold text-slate-100">{brief.totalTokensUsed.toLocaleString()}</p>
                     </div>
                     <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">פלטפורמות יעד</p>
-                      <p className="text-sm font-semibold text-slate-100">{brief.targetPlatforms?.length > 0 ? brief.targetPlatforms.join(', ') : 'לא הוגדרו'}</p>
+                      <p className="text-xs text-slate-400 mb-1">{tt('פלטפורמות יעד')}</p>
+                      <p className="text-sm font-semibold text-slate-100">{brief.targetPlatforms?.length > 0 ? brief.targetPlatforms.join(', ') : tt('לא הוגדרו')}</p>
                     </div>
                   </div>
                   {/* Department summary list */}
@@ -1712,7 +2020,7 @@ export default function AdminNexusBrief() {
               {activeTab !== 'summary' && (() => {
                 const deptRecord = departments.find((d) => d.department === activeTab);
                 const deptMeta = ALL_DEPARTMENTS.find((x) => x.id === activeTab);
-                if (!deptRecord) return <p className="text-slate-400 text-sm">מחלקה לא נמצאה</p>;
+                if (!deptRecord) return <p className="text-slate-400 text-sm">{tt('מחלקה לא נמצאה')}</p>;
                 return (
                   <div>
                     {/* Dept header */}
@@ -1738,14 +2046,14 @@ export default function AdminNexusBrief() {
                       !deptRecord.modelUsed.startsWith('claude') && (
                       <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
                         <span>⚠️</span>
-                        <span>Claude נבחר אך לא הצליח לרוץ — רץ במקומו על <strong>{deptRecord.modelUsed}</strong>.
+                        <span>{tt('Claude נבחר אך לא הצליח לרוץ — רץ במקומו על')} <strong>{deptRecord.modelUsed}</strong>.
                           {deptRecord.errorMessage?.includes('credit balance')
-                            ? ' סיבה: אין קרדיט בחשבון Anthropic — יש להוסיף קרדיט ב-console.anthropic.com'
+                            ? ` ${tt('סיבה: אין קרדיט בחשבון Anthropic — יש להוסיף קרדיט ב-console.anthropic.com')}`
                             : deptRecord.errorMessage?.includes('rate')
-                              ? ' סיבה: חריגת rate limit — נסה שוב בעוד דקה'
+                              ? ` ${tt('סיבה: חריגת rate limit — נסה שוב בעוד דקה')}`
                               : deptRecord.errorMessage
-                                ? ` סיבה: ${deptRecord.errorMessage.slice(0, 120)}`
-                                : ' בדוק שגיאות בלוג השרת (ANTHROPIC_API_KEY, credits, rate-limit).'}
+                                ? ` ${tt('סיבה')}: ${deptRecord.errorMessage.slice(0, 120)}`
+                                : ` ${tt('בדוק שגיאות בלוג השרת (ANTHROPIC_API_KEY, credits, rate-limit).')}`}
                         </span>
                       </div>
                     )}
@@ -1760,7 +2068,7 @@ export default function AdminNexusBrief() {
                     {deptRecord.promptSnapshot && (
                       <details className="mt-4 border border-slate-700 rounded-lg">
                         <summary className="px-4 py-2 text-xs text-slate-400 cursor-pointer hover:text-slate-300 select-none">
-                          💭 מה נשאל ה-Agent (הצג/הסתר)
+                          {tt('💭 מה נשאל ה-Agent (הצג/הסתר)')}
                         </summary>
                         <pre className="p-4 text-xs text-slate-400 font-mono whitespace-pre-wrap overflow-auto max-h-80 bg-slate-900/50">
                           {deptRecord.promptSnapshot}
@@ -1784,7 +2092,7 @@ export default function AdminNexusBrief() {
               <div className="admin-card space-y-5">
                 <div className="flex items-center gap-2">
                   <Globe className="w-5 h-5 text-blue-400" />
-                  <span className="text-base font-semibold text-slate-100">מקורות מהרשת ({webSources.length})</span>
+                  <span className="text-base font-semibold text-slate-100">{tt('מקורות מהרשת')} ({webSources.length})</span>
                 </div>
 
                 {/* GitHub Repos */}
@@ -1834,7 +2142,7 @@ export default function AdminNexusBrief() {
                 {reddit.length > 0 && (
                   <div>
                     <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <span>🤖</span> Reddit — דיונים קהילתיים
+                      <span>🤖</span> Reddit — {tt('דיונים קהילתיים')}
                     </h4>
                     <div className="space-y-2">
                       {reddit.map((s) => (
@@ -1870,7 +2178,7 @@ export default function AdminNexusBrief() {
                 {articles.length > 0 && (
                   <div>
                     <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Rss className="w-3.5 h-3.5" /> מאמרים, בלוגים ו-YouTube ({articles.length})
+                      <Rss className="w-3.5 h-3.5" /> {tt('מאמרים, בלוגים ו-YouTube')} ({articles.length})
                     </h4>
                     <div className="space-y-2">
                       {articles.map((s) => {
@@ -1934,8 +2242,8 @@ export default function AdminNexusBrief() {
           <div className="admin-card">
             <div className="flex items-center gap-2 mb-4">
               <FileText className="w-5 h-5 text-emerald-400" />
-              <h2 className="text-base font-semibold text-slate-100">מסמכי אפיון ופיתוח</h2>
-              <span className="text-xs admin-muted">כל מסמך נוצר ע"י AI בהתבסס על ממצאי הניירת</span>
+              <h2 className="text-base font-semibold text-slate-100">{tt('מסמכי אפיון ופיתוח')}</h2>
+              <span className="text-xs admin-muted">{tt('כל מסמך נוצר ע"י AI בהתבסס על ממצאי הניירת')}</span>
               <button
                 onClick={handleDownloadAllDocs}
                 disabled={downloadingAllDocs}
@@ -1944,17 +2252,17 @@ export default function AdminNexusBrief() {
                 {downloadingAllDocs ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>{downloadAllProgress}/8 מסמכים...</span>
+                    <span>{downloadAllProgress}/8 {tt('מסמכים...')}</span>
                   </>
                 ) : (
                   <>
                     <FileDown className="w-3.5 h-3.5" />
-                    <span>הורד הכל (ZIP)</span>
+                    <span>{tt('הורד הכל (ZIP)')}</span>
                   </>
                 )}
               </button>
             </div>
-            <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-4 xl:grid-cols-8 gap-2 mb-4">
               {[
                 { type: 'prd',       label: 'PRD',       sub: 'Product Requirements',  icon: <FileText className="w-4 h-4" />,  color: 'indigo' },
                 { type: 'erd',       label: 'ERD',       sub: 'Database Schema',        icon: <Database className="w-4 h-4" />, color: 'blue' },
@@ -1987,8 +2295,8 @@ export default function AdminNexusBrief() {
                     {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : doc.icon}
                     <span className="text-xs font-semibold">{doc.label}</span>
                     <span className="text-xs opacity-70 leading-tight">{doc.sub}</span>
-                    {generated && <span className="text-xs text-green-400 font-mono">✓ מוכן</span>}
-                    {isGenerating && <span className="text-xs opacity-70">יוצר...</span>}
+                    {generated && <span className="text-xs text-green-400 font-mono">{tt('✓ מוכן')}</span>}
+                    {isGenerating && <span className="text-xs opacity-70">{tt('יוצר...')}</span>}
                   </button>
                 );
               })}
@@ -2011,7 +2319,7 @@ export default function AdminNexusBrief() {
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
                   >
-                    <FileDown className="w-3.5 h-3.5" /> הורד MD
+                    <FileDown className="w-3.5 h-3.5" /> {tt('הורד MD')}
                   </button>
                   <button onClick={() => setExpandedDoc(null)} className="p-1.5 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-300">
                     <XCircle className="w-4 h-4" />
@@ -2029,8 +2337,8 @@ export default function AdminNexusBrief() {
             <div className="admin-table-card">
               <div className="px-5 py-4 border-b border-slate-700 flex items-center gap-2">
                 <Brain className="w-5 h-5 text-purple-400" />
-                <span className="text-base font-semibold text-slate-100">שיחות ומחקר מחלקות ({departments.length})</span>
-                <span className="text-xs admin-muted mr-auto">לחץ על מחלקה לצפייה בשיחה המלאה</span>
+                <span className="text-base font-semibold text-slate-100">{tt('שיחות ומחקר מחלקות')} ({departments.length})</span>
+                <span className="text-xs admin-muted mr-auto">{tt('לחץ על מחלקה לצפייה בשיחה המלאה')}</span>
               </div>
               {departments.map((dept) => {
                 const deptInfo = ALL_DEPARTMENTS.find((d) => d.id === dept.department);
@@ -2062,13 +2370,13 @@ export default function AdminNexusBrief() {
                             onClick={(e) => { e.stopPropagation(); setShowSystemPrompt(showSystemPrompt === dept.id ? null : dept.id); }}
                             className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${showSystemPrompt === dept.id ? 'border-purple-500 text-purple-300 bg-purple-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
                           >
-                            🤖 System Prompt (הנחיות לסוכן)
+                            {tt('🤖 System Prompt (הנחיות לסוכן)')}
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setShowSystemPrompt(null); }}
                             className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${showSystemPrompt !== dept.id ? 'border-indigo-500 text-indigo-300 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
                           >
-                            📄 תוצאת המחקר
+                            {tt('📄 תוצאת המחקר')}
                           </button>
                         </div>
 
@@ -2077,12 +2385,12 @@ export default function AdminNexusBrief() {
                           <div className="p-5">
                             <div className="mb-3 flex items-center gap-2">
                               <span className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-300 font-mono">SYSTEM</span>
-                              <span className="text-xs admin-muted">ההנחיות שקיבל הסוכן — מגדירות את תפקידו, פורמט הפלט, ומיקוד המחקר</span>
+                              <span className="text-xs admin-muted">{tt('ההנחיות שקיבל הסוכן — מגדירות את תפקידו, פורמט הפלט, ומיקוד המחקר')}</span>
                             </div>
                             <pre className="text-sm text-slate-300 bg-slate-900/60 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed border border-slate-700/50" dir="rtl">
                               {deptConfig.systemPrompt}
                             </pre>
-                            <p className="text-xs admin-muted mt-3">מודל: <span className="font-mono text-slate-300">{dept.modelUsed}</span></p>
+                            <p className="text-xs admin-muted mt-3">{tt('מודל')}: <span className="font-mono text-slate-300">{dept.modelUsed}</span></p>
                           </div>
                         ) : (
                           /* Output view */
@@ -2090,12 +2398,12 @@ export default function AdminNexusBrief() {
                             {dept.output ? (
                               <>
                                 <MarkdownRenderer content={dept.output} />
-                                <p className="text-sm admin-muted mt-3 font-mono">מודל: {dept.modelUsed} | tokens: {dept.tokensUsed.toLocaleString()} | ${Number(dept.costUsd).toFixed(4)}</p>
+                                <p className="text-sm admin-muted mt-3 font-mono">{tt('מודל')}: {dept.modelUsed} | tokens: {dept.tokensUsed.toLocaleString()} | ${Number(dept.costUsd).toFixed(4)}</p>
                               </>
                             ) : dept.status === 'error' ? (
-                              <p className="text-sm text-red-400">{dept.errorMessage ?? 'שגיאה לא ידועה'}</p>
+                              <p className="text-sm text-red-400">{dept.errorMessage ?? tt('שגיאה לא ידועה')}</p>
                             ) : (
-                              <p className="text-sm admin-muted">לא הופקה תוצאה</p>
+                              <p className="text-sm admin-muted">{tt('לא הופקה תוצאה')}</p>
                             )}
                           </div>
                         )}
@@ -2113,9 +2421,9 @@ export default function AdminNexusBrief() {
       {refineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-lg mx-4 rounded-2xl border border-cyan-500/40 bg-slate-900 p-6">
-            <h3 className="text-lg font-bold text-slate-100 mb-1">🔁 חדד וחקור מחדש</h3>
-            <p className="text-sm admin-muted mb-4">הניירת תאופס לטיוטה. ההוראות שתוסיף יוזרקו לכל ה-agents בחקירה הבאה.</p>
-            <label className="block text-sm font-medium text-slate-300 mb-2">הוראות / הבהרות לחקירה הבאה</label>
+            <h3 className="text-lg font-bold text-slate-100 mb-1">{tt('🔁 חדד וחקור מחדש')}</h3>
+            <p className="text-sm admin-muted mb-4">{tt('הניירת תאופס לטיוטה. ההוראות שתוסיף יוזרקו לכל ה-agents בחקירה הבאה.')}</p>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{tt('הוראות / הבהרות לחקירה הבאה')}</label>
             <textarea
               value={refineNotes}
               onChange={(e) => setRefineNotes(e.target.value)}
@@ -2126,14 +2434,14 @@ export default function AdminNexusBrief() {
               autoFocus
             />
             <div className="flex gap-3 justify-end mt-5">
-              <button onClick={() => setRefineModal(false)} className="admin-btn-secondary">ביטול</button>
+              <button onClick={() => setRefineModal(false)} className="admin-btn-secondary">{tt('ביטול')}</button>
               <button
                 onClick={handleRefine}
                 disabled={refining}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-semibold transition-colors"
               >
                 {refining ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>🔁</span>}
-                חדד וחזור לטיוטה
+                {tt('חדד וחזור לטיוטה')}
               </button>
             </div>
           </div>
@@ -2144,8 +2452,8 @@ export default function AdminNexusBrief() {
       {rejectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-md mx-4 rounded-2xl border border-slate-600 bg-slate-900 p-6">
-            <h3 className="text-lg font-bold text-slate-100 mb-4">דחיית ניירת</h3>
-            <label className="block text-sm admin-muted mb-2 font-medium">נימוק (אופציונלי)</label>
+            <h3 className="text-lg font-bold text-slate-100 mb-4">{tt('דחיית ניירת')}</h3>
+            <label className="block text-sm admin-muted mb-2 font-medium">{tt('נימוק (אופציונלי)')}</label>
             <textarea
               value={rejectNotes}
               onChange={(e) => setRejectNotes(e.target.value)}
@@ -2154,14 +2462,14 @@ export default function AdminNexusBrief() {
               dir="rtl"
             />
             <div className="flex gap-3 justify-end mt-5">
-              <button onClick={() => setRejectModal(false)} className="admin-btn-secondary">ביטול</button>
+              <button onClick={() => setRejectModal(false)} className="admin-btn-secondary">{tt('ביטול')}</button>
               <button
                 onClick={handleReject}
                 disabled={actionLoading === 'reject'}
                 className="admin-btn-danger flex items-center gap-2"
               >
                 {actionLoading === 'reject' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                דחה ניירת
+                {tt('דחה ניירת')}
               </button>
             </div>
           </div>

@@ -230,5 +230,14 @@ export async function gatherWebIntelligenceHybrid(
     return { result, source: 'direct' };
   }
 
-  return { result: { sources: [], synthesizedContext: '' }, source: 'direct' };
+  // Last resort: attempt dynamic import of direct intelligence as final fallback
+  try {
+    const { gatherWebIntelligence } = await import('./nexusWebIntelligence');
+    console.warn('[n8nBridge] No directFallback provided, attempting dynamic fallback');
+    const result = await gatherWebIntelligence(ideaPrompt, departments);
+    return { result, source: 'direct' };
+  } catch {
+    console.error('[n8nBridge] All fallbacks failed, returning empty result');
+    return { result: { sources: [], synthesizedContext: '' }, source: 'direct' };
+  }
 }

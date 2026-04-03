@@ -440,6 +440,12 @@ const startServer = (port: number) => {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_nexus_extracted_brief ON nexus_extracted_tasks(brief_id)`);
+    // Seed ai-dev department if not exists
+    await db.execute(sql`
+      INSERT INTO nexus_dept_settings (department, label_he, emoji, is_active)
+      VALUES ('ai-dev', 'תרגום AI לפיתוח', '🤖', true)
+      ON CONFLICT (department) DO NOTHING
+    `);
     // Add new columns to nexus_briefs if missing
     await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS generated_sprint_id uuid`);
     await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS phase_id uuid`);
@@ -640,6 +646,9 @@ const startServer = (port: number) => {
       )
     `);
 
+    // Patch: fix 'rnd' → 'rd' inconsistency in department knowledge (R&D dept ID must be 'rd')
+    await db.execute(sql`UPDATE nexus_dept_knowledge SET department = 'rd' WHERE department = 'rnd'`);
+
     // Seed department knowledge if empty
     const knowledgeCount = await db.execute(sql`SELECT COUNT(*)::int AS c FROM nexus_dept_knowledge`);
     if (((knowledgeCount as any).rows?.[0]?.c ?? 0) === 0) {
@@ -654,8 +663,8 @@ const startServer = (port: number) => {
         ('cto', 'metrics', 'מדדי ביצועים', 'Uptime 99.9%, API latency < 200ms, Build time < 3min, Zero critical CVEs, Test coverage > 70%', 2),
         ('cpo', 'responsibilities', 'תחומי אחריות', 'אסטרטגיית מוצר, UX, Product-Market Fit, תעדוף פיצ׳רים (MoSCoW), KPIs, User Research, Persona Management', 0),
         ('cpo', 'standards', 'עקרונות מוצר', 'Hebrew-first UI, RTL, נגישות WCAG 2.1 AA, Mobile-responsive, משפחה במרכז (לא רק המטופל)', 1),
-        ('rnd', 'responsibilities', 'תחומי אחריות', 'מחקר טכני מעמיק, ספריות וכלים, POC, גישות מימוש, Trust Score לכל ספרייה, Code Samples', 0),
-        ('rnd', 'standards', 'קריטריוני בחירת ספריות', 'GitHub stars > 1000, פעילות אחרונה < 3 חודשים, TypeScript support, MIT/Apache license, אין GPL', 1),
+        ('rd', 'responsibilities', 'תחומי אחריות', 'מחקר טכני מעמיק, ספריות וכלים, POC, גישות מימוש, Trust Score לכל ספרייה, Code Samples', 0),
+        ('rd', 'standards', 'קריטריוני בחירת ספריות', 'GitHub stars > 1000, פעילות אחרונה < 3 חודשים, TypeScript support, MIT/Apache license, אין GPL', 1),
         ('design', 'responsibilities', 'תחומי אחריות', 'UX/UI Design, Design System, WCAG 2.1 AA, RTL Support, מגמות 2025, Wireframes, Micro-interactions', 0),
         ('design', 'standards', 'Design System', 'צבעים: Slate/Violet/Emerald, Font: Heebo, Spacing: Tailwind scale, Components: shadcn/ui, Dark mode support', 1),
         ('product', 'responsibilities', 'תחומי אחריות', 'User Stories (Given/When/Then), Acceptance Criteria, Sprint Planning, Backlog Management, DoD', 0),
@@ -667,7 +676,15 @@ const startServer = (port: number) => {
         ('marketing', 'responsibilities', 'תחומי אחריות', 'GTM Strategy, SEO, Positioning, Content Marketing, Competitive Analysis, Messaging Framework, Channel Strategy', 0),
         ('marketing', 'standards', 'קהל יעד', 'B2C: משפחות עם קרוב עם דמנציה בישראל, גיל 35-65, דוברי עברית, Tech-savvy enough לאפליקציית ווב', 1),
         ('finance', 'responsibilities', 'תחומי אחריות', 'ROI Analysis, Cost-Benefit, Unit Economics, Budget, Stage-Gate Checkpoints, BI, Break-even Analysis', 0),
-        ('finance', 'metrics', 'מודל עסקי', '$15/user/month, 25 users/org avg, $4,500/org/year, Dev cost per feature: $80-200K, Break-even: month 14, Payback: 18 months', 1)
+        ('finance', 'metrics', 'מודל עסקי', '$15/user/month, 25 users/org avg, $4,500/org/year, Dev cost per feature: $80-200K, Break-even: month 14, Payback: 18 months', 1),
+        ('hr', 'responsibilities', 'תחומי אחריות', 'Capacity Analysis — מה AI מבצע vs מה דורש אנשים, תפקידים אנושיים נדרשים (PM, QA, DevOps, CS — לא מפתחים), סיכוני תלות ב-AI, Backup Plans', 0),
+        ('hr', 'standards', 'מודל פיתוח AI', 'כל הפיתוח מתבצע ע"י Claude Code AI. אין צוות פיתוח אנושי. יש צורך באנשים ל-Product Management, QA, DevOps, Customer Support בלבד.', 1),
+        ('cs', 'responsibilities', 'תחומי אחריות', 'Onboarding Experience, Churn Prevention, NPS Impact, Support Load Analysis, Self-Service Feasibility, Adoption Planning', 0),
+        ('cs', 'standards', 'פרופיל לקוחות', 'המשתמשים הם בני משפחה של חולי דמנציה/אלצהיימר — אנשים תחת לחץ רגשי כבד. כל שינוי UX חייב להיות פשוט, ברור ולא מבלבל.', 1),
+        ('sales', 'responsibilities', 'תחומי אחריות', 'Sales Impact, Pricing/Upsell, Objection Handling, Channel Strategy, Partnerships (ארגוני דמנציה, בתי חולים, קופות חולים)', 0),
+        ('sales', 'standards', 'קהל יעד מכירות', 'B2C ישראל: משפחות גיל 35-65 עם קרוב חולה דמנציה. ערוצים: דיגיטלי, שיתופי פעולה עם ארגוני בריאות, רופאים מפנים.', 1),
+        ('ai-dev', 'responsibilities', 'תחומי אחריות', 'תרגום מחקר רב-מחלקתי לתכנית פיתוח Claude Code. הפרדה ל-5 שכבות: User FE, Admin FE, User BE, Admin BE, Server Core.', 0),
+        ('ai-dev', 'standards', 'עקרונות פיתוח AI', 'סדר פיתוח: DB Schema → Server API → Admin UI → User UI. כל משימה self-contained. אין לבנות מחדש מה שקיים. TypeScript strict.', 1)
         ON CONFLICT DO NOTHING
       `);
       console.log('DB: department knowledge seeded');
@@ -684,6 +701,129 @@ const startServer = (port: number) => {
         created_at timestamp with time zone DEFAULT now() NOT NULL
       )
     `);
+
+    // Patch: Team member CV/profile fields
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS bio TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS experience_years INTEGER`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS education TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS certifications TEXT[]`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS domain_expertise TEXT[]`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS languages TEXT[]`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS methodology TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS personality TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS achievements TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS background TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_dept_team_members ADD COLUMN IF NOT EXISTS work_history JSONB DEFAULT '[]'`);
+
+    // CV seed data: run `node scripts/seed-nexus-cv-data.mjs` to populate full CVs for all team members
+    const cvSeeds: { dept: string; level: string; data: Record<string, any> }[] = [
+      // ═══ CEO Department ═══
+      { dept: 'ceo', level: 'clevel', data: {
+        bio: 'מנכ"ל ותיק עם 25+ שנות ניסיון בהובלת חברות טכנולוגיה מ-Seed ועד IPO. מומחה בבניית ארגונים, גיוסי הון וכניסה לשווקים בינלאומיים. מוביל אסטרטגיה עסקית מבוססת נתונים.',
+        experience_years: 25, education: 'MBA Harvard Business School, B.Sc Computer Science — Technion',
+        background: 'הוביל 3 חברות ל-Exit מוצלח (שתיים IPO, אחת M&A ב-$2.1B). בעל ניסיון ב-board של 5 חברות ציבוריות. מרצה אורח ב-Stanford GSB.',
+        achievements: 'הוביל IPO של TechVision ($4.2B valuation)\nגיוס סבב D של $180M ב-DataPrime\nהכפלת ARR מ-$12M ל-$85M תוך 3 שנים\nבניית צוות גלובלי של 400+ עובדים',
+        certifications: '{CFA,"Board Governance Certificate (NACD)","YPO Member"}',
+        domain_expertise: '{"SaaS B2B","Digital Health","FinTech","Enterprise Software","AI/ML Products"}',
+        languages: '{"Hebrew","English","Mandarin (Basic)"}',
+        methodology: 'OKR-driven, Data-informed decisions, Stage-Gate for product, Lean Startup for innovation',
+        personality: 'ויזיונרי, מונע תוצאות, בונה תרבות, מעדיף speed over perfection, אמפתי אך דרשן',
+        work_history: '[{"company":"TechVision","role":"CEO & Co-Founder","years":"2018-2025","highlights":"Led from Seed to IPO at $4.2B valuation, 400+ employees globally"},{"company":"DataPrime","role":"CEO","years":"2013-2018","highlights":"Grew ARR from $12M to $85M, raised $180M Series D"},{"company":"Microsoft","role":"GM, Cloud Division","years":"2008-2013","highlights":"Led Azure adoption in EMEA, grew division 340%"},{"company":"IDF Intelligence","role":"Technology Officer","years":"2000-2003","highlights":"Unit 8200, led signal processing R&D team"}]'
+      }},
+      // ═══ CTO Department — Chief ═══
+      { dept: 'cto', level: 'clevel', data: {
+        bio: 'CTO עם 20+ שנות ניסיון בארכיטקטורת מערכות Large-Scale, Cloud Infrastructure, ו-AI/ML. מוביל טרנספורמציות טכנולוגיות בחברות מ-startup ועד enterprise.',
+        experience_years: 22, education: 'M.Sc Computer Science (Distributed Systems) — Technion, B.Sc Mathematics & CS — Tel Aviv University',
+        background: 'בנה מערכות שמשרתות 50M+ משתמשים. מומחה ב-microservices, event-driven architecture, ו-real-time data pipelines. תורם לפרויקטי open-source.',
+        achievements: 'ארכיטקטורת מערכת real-time ל-50M users ב-ScaleUp\nמעבר מ-monolith ל-microservices ב-0 downtime\nהקמת AI/ML pipeline שחסך $2M/שנה\n15 פטנטים רשומים',
+        certifications: '{"AWS Solutions Architect Professional","Google Cloud Professional Architect","Kubernetes CKA","HashiCorp Terraform Associate"}',
+        domain_expertise: '{"Cloud Architecture","Distributed Systems","AI/ML Infrastructure","DevOps","Real-time Processing","Security Architecture"}',
+        languages: '{"Hebrew","English","TypeScript","Python","Go","Rust","SQL"}',
+        methodology: 'Architecture Decision Records (ADR), RFC-driven design, Trunk-Based Development, Infrastructure as Code, Chaos Engineering',
+        personality: 'אנליטי, שיטתי, מעדיף פשטות על מורכבות, mentor טבעי, obsessed with reliability',
+        work_history: '[{"company":"ScaleUp Technologies","role":"CTO","years":"2019-2025","highlights":"Built platform serving 50M users, 99.99% uptime, team of 85 engineers"},{"company":"Amazon Web Services","role":"Principal Engineer","years":"2014-2019","highlights":"Led Lambda cold-start optimization, 15 patents filed"},{"company":"Waze","role":"VP Engineering","years":"2010-2014","highlights":"Scaled from 5M to 50M users pre-acquisition by Google"},{"company":"IDF","role":"Team Lead, Unit 81","years":"2002-2005","highlights":"Built real-time intelligence systems"}]'
+      }},
+      // ═══ CPO ═══
+      { dept: 'cpo', level: 'clevel', data: {
+        bio: 'מנהל מוצר ראשי עם 18 שנות ניסיון ב-product strategy, UX research, ו-growth. בנה מוצרים שמשרתים מיליוני משתמשים בתחומי Health Tech, SaaS ו-Consumer.',
+        experience_years: 18, education: 'MBA INSEAD, B.Des Industrial Design — Bezalel Academy',
+        background: 'שילוב ייחודי של design thinking עם business acumen. הוביל product orgs של 50+ אנשים. מאמין ב-outcome-driven development.',
+        achievements: 'הובלת מוצר מ-0 ל-2M users ב-HealthBridge\nשיפור retention ב-40% דרך product-led growth\nבניית design system שאומץ ב-3 חברות\nדובר ב-Mind the Product, ProductCon',
+        certifications: '{"Pragmatic Marketing Certified","SAFe Product Owner","Google UX Design Certificate"}',
+        domain_expertise: '{"Product Strategy","UX Research","Growth","Product-Led Growth","Healthcare UX","Accessibility"}',
+        languages: '{"Hebrew","English","French","Figma","SQL","Python (Data Analysis)"}',
+        methodology: 'Jobs-to-be-Done (JTBD), Dual-Track Agile, RICE scoring, North Star Metric, Continuous Discovery',
+        personality: 'אמפתי, user-obsessed, דאטה-driven אבל לא מפחד מאינטואיציה, collaborative, מגשר בין tech ל-business',
+        work_history: '[{"company":"HealthBridge","role":"CPO","years":"2020-2025","highlights":"0 to 2M users, 40% retention improvement, $50M ARR"},{"company":"Spotify","role":"Director of Product","years":"2016-2020","highlights":"Led Discover Weekly personalization, 15% engagement increase"},{"company":"Wix","role":"Senior PM","years":"2012-2016","highlights":"Built Wix ADI (AI Design Intelligence)"},{"company":"IBM Design","role":"UX Researcher","years":"2008-2012","highlights":"Enterprise UX transformation program"}]'
+      }},
+      // ═══ R&D Lead ═══
+      { dept: 'rd', level: 'clevel', data: {
+        bio: 'ראש מחלקת R&D עם 15 שנות ניסיון בפיתוח מוצרים, ניהול צוותי פיתוח, ו-technical leadership. מתמחה בזיהוי טכנולוגיות חדשות והבאתן ל-production.',
+        experience_years: 15, education: 'M.Sc AI & Machine Learning — Hebrew University, B.Sc Computer Science — BGU',
+        background: 'ניהל צוותי R&D של 30+ מפתחים. מומחה בהערכת ספריות וטכנולוגיות חדשות, POC מהיר, ו-technical due diligence.',
+        achievements: 'בניית מערכת NLP בעברית עם 94% accuracy\nהובלת POC ל-15 טכנולוגיות חדשות בשנה\n3 מאמרים אקדמיים שפורסמו\nOpen-source contributor (2K+ GitHub stars)',
+        certifications: '{"Deep Learning Specialization (Coursera/Stanford)","MongoDB Certified Developer","React Native Specialist"}',
+        domain_expertise: '{"NLP","Computer Vision","Edge Computing","React Ecosystem","Node.js","PostgreSQL"}',
+        languages: '{"Hebrew","English","TypeScript","Python","Rust","C++"}',
+        methodology: 'Spike-driven research, POC before commitment, Build vs Buy matrix, Technical Radar (ThoughtWorks style)',
+        personality: 'סקרן, hands-on, חותר לעומק, evidence-based, מעדיף לבנות prototype לפני שמדבר',
+        work_history: '[{"company":"AI Dynamics","role":"VP R&D","years":"2020-2025","highlights":"Built Hebrew NLP engine, 30-person R&D team"},{"company":"Google","role":"Senior SWE, Research","years":"2015-2020","highlights":"TensorFlow contributor, 3 published papers"},{"company":"Check Point","role":"R&D Team Lead","years":"2010-2015","highlights":"Led threat intelligence engine development"}]'
+      }},
+      // ═══ Security (CISO) ═══
+      { dept: 'security', level: 'clevel', data: {
+        bio: 'CISO עם 20 שנות ניסיון באבטחת מידע, compliance, ו-incident response. רקע מודיעיני צבאי, מומחה OWASP ו-Zero Trust Architecture.',
+        experience_years: 20, education: 'M.Sc Cybersecurity — Georgia Tech (Online), B.Sc Computer Engineering — Technion',
+        background: 'הוביל תוכניות אבטחה בארגונים עם 10,000+ עובדים. ניסיון ב-SOC 2, ISO 27001, HIPAA, GDPR compliance. מרצה בכנסי אבטחה בינלאומיים.',
+        achievements: 'הטמעת Zero Trust Architecture ב-FinSecure (0 breaches ב-3 שנים)\nהובלת SOC 2 Type II certification ב-4 חודשים\nזיהוי ומניעת APT attack שווי $50M\nבניית Security Champions program ל-200 מפתחים',
+        certifications: '{"CISSP","CISM","CEH","AWS Security Specialty","OSCP","ISO 27001 Lead Auditor"}',
+        domain_expertise: '{"Application Security","Cloud Security","Threat Modeling","Incident Response","Compliance (SOC2/ISO/HIPAA/GDPR)","Penetration Testing"}',
+        languages: '{"Hebrew","English","Russian","Python","Bash","Assembly"}',
+        methodology: 'Defense in Depth, Shift-Left Security, Threat Modeling (STRIDE), Security by Design, Bug Bounty programs',
+        personality: 'פרנואיד (באופן מקצועי), מדויק, שיטתי, zero-tolerance לפשרות באבטחה, מורה סבלני',
+        work_history: '[{"company":"FinSecure","role":"CISO","years":"2019-2025","highlights":"Zero Trust implementation, SOC 2 in 4 months, 0 breaches"},{"company":"CyberArk","role":"Director of Security","years":"2014-2019","highlights":"Led product security for PAM platform"},{"company":"NSO Group","role":"Security Architect","years":"2010-2014","highlights":"Offensive security research"},{"company":"IDF Intelligence","role":"Cyber Operations","years":"2004-2008","highlights":"Unit 8200, offensive cyber operations"}]'
+      }},
+      // ═══ Finance (CFO) ═══
+      { dept: 'finance', level: 'clevel', data: {
+        bio: 'CFO עם 18 שנות ניסיון בניהול פיננסי, גיוסי הון, M&A, ו-IPO readiness. מומחה ב-unit economics, financial modeling, ו-investor relations.',
+        experience_years: 18, education: 'MBA Finance — Wharton, B.A Economics & Accounting — Tel Aviv University, CPA (Israel)',
+        background: 'ניהל פיננסים של חברות מ-Seed ($2M) ועד Post-IPO ($3B). ניסיון ב-5 סבבי גיוס, 2 IPOs, ו-3 M&A transactions.',
+        achievements: 'הובלת IPO של CloudNine ($3.2B valuation)\nגיוס מצטבר של $450M\nבניית מודל פיננסי שחזה ARR ב-±3% accuracy\nחיסכון של $8M/שנה דרך אופטימיזציית עלויות cloud',
+        certifications: '{"CPA (Israel)","CFA Level III","SOX Compliance Expert"}',
+        domain_expertise: '{"Financial Modeling","SaaS Metrics","Unit Economics","IPO Readiness","M&A","Investor Relations","Cost Optimization"}',
+        languages: '{"Hebrew","English","Excel/Sheets","SQL","Python (Pandas)"}',
+        methodology: 'Zero-Based Budgeting, Stage-Gate investment, Monthly Business Review, 13-week cash flow forecasting',
+        personality: 'מדויק עד לשקל, conservative בתחזיות, שקוף עם הדירקטוריון, data-first, אנטי-hype',
+        work_history: '[{"company":"CloudNine","role":"CFO","years":"2019-2025","highlights":"Led IPO at $3.2B, raised $450M total, SOX compliance"},{"company":"Fiverr","role":"VP Finance","years":"2015-2019","highlights":"Pre-IPO financial infrastructure, SEC reporting"},{"company":"Deloitte","role":"Senior Manager, Tech M&A","years":"2010-2015","highlights":"Advised on $2B+ in tech transactions"},{"company":"PwC","role":"Auditor","years":"2007-2010","highlights":"Big 4 audit experience, tech sector"}]'
+      }},
+    ];
+
+    for (const seed of cvSeeds) {
+      try {
+        const d = seed.data;
+        // Update text fields (only if bio is still NULL — won't overwrite manual edits)
+        await db.execute(sql`
+          UPDATE nexus_dept_team_members SET
+            bio = ${d.bio},
+            experience_years = ${d.experience_years},
+            education = ${d.education},
+            background = ${d.background},
+            achievements = ${d.achievements},
+            methodology = ${d.methodology},
+            personality = ${d.personality}
+          WHERE department = ${seed.dept} AND level = ${seed.level} AND bio IS NULL
+        `);
+        // Array and JSONB fields via raw SQL
+        await db.execute(sql.raw(`
+          UPDATE nexus_dept_team_members SET
+            certifications = '${d.certifications}'::text[],
+            domain_expertise = '${d.domain_expertise}'::text[],
+            languages = '${d.languages}'::text[],
+            work_history = '${d.work_history.replace(/'/g, "''")}'::jsonb
+          WHERE department = '${seed.dept}' AND level = '${seed.level}'
+            AND (certifications IS NULL OR array_length(certifications, 1) IS NULL)
+        `));
+      } catch { /* seed already applied or no matching row */ }
+    }
 
     console.log('DB: schema patches applied');
   } catch (err: any) {

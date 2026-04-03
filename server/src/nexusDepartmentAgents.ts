@@ -19,7 +19,13 @@ export type NexusDeptSetting = {
   isActive: boolean;
 };
 export type NexusSkill = { id: string; name: string; labelHe: string; category: string };
-export type NexusTeamMember = { department: string; name: string; roleHe: string; level: string; skills: string[] };
+export type NexusTeamMember = {
+  department: string; name: string; roleHe: string; level: string; skills: string[];
+  responsibilities: string | null; systemPromptOverride: string | null;
+  bio: string | null; experienceYears: number | null; education: string | null;
+  certifications: string[] | null; domainExpertise: string[] | null;
+  methodology: string | null; personality: string | null; background: string | null;
+};
 
 export type NexusConfig = {
   deptSettings: Record<string, NexusDeptSetting>;
@@ -36,7 +42,7 @@ export async function loadNexusConfig(): Promise<NexusConfig> {
     const [ds, sk, tm] = await Promise.all([
       pool.query(`SELECT department, system_prompt_override, default_model, is_active FROM nexus_dept_settings`),
       pool.query(`SELECT id, name, label_he, category FROM nexus_skills WHERE is_active = true ORDER BY category, name`),
-      pool.query(`SELECT department, name, role_he, level, COALESCE(skills, '{}') AS skills FROM nexus_dept_team_members WHERE is_active = true ORDER BY department, order_index`),
+      pool.query(`SELECT department, name, role_he, level, COALESCE(skills, '{}') AS skills, responsibilities, system_prompt_override, bio, experience_years, education, COALESCE(certifications, '{}') AS certifications, COALESCE(domain_expertise, '{}') AS domain_expertise, methodology, personality, background FROM nexus_dept_team_members WHERE is_active = true ORDER BY department, order_index`),
     ]);
     await pool.end();
     const deptSettings: Record<string, NexusDeptSetting> = {};
@@ -54,6 +60,16 @@ export async function loadNexusConfig(): Promise<NexusConfig> {
       teamMembers: tm.rows.map((r) => ({
         department: r.department, name: r.name, roleHe: r.role_he, level: r.level,
         skills: Array.isArray(r.skills) ? r.skills : [],
+        responsibilities: r.responsibilities ?? null,
+        systemPromptOverride: r.system_prompt_override ?? null,
+        bio: r.bio ?? null,
+        experienceYears: r.experience_years ?? null,
+        education: r.education ?? null,
+        certifications: Array.isArray(r.certifications) ? r.certifications : null,
+        domainExpertise: Array.isArray(r.domain_expertise) ? r.domain_expertise : null,
+        methodology: r.methodology ?? null,
+        personality: r.personality ?? null,
+        background: r.background ?? null,
       })),
     };
   } catch {
@@ -74,7 +90,8 @@ export type DepartmentId =
   | 'finance'
   | 'hr'
   | 'cs'
-  | 'sales';
+  | 'sales'
+  | 'ai-dev';
 
 export type DepartmentResult = {
   department: DepartmentId;
@@ -93,6 +110,68 @@ type DepartmentConfig = {
   systemPrompt: string;
   outputSections: string[];
 };
+
+// ── Claude Code Development Context (injected into ALL department prompts) ────
+
+const CLAUDE_CODE_CONTEXT = `**מודל פיתוח: Claude Code AI**
+כל הפיתוח בפרויקט הזה מתבצע ע"י Claude Code / Cursor — AI שמקבל prompt ומייצר קוד מלא.
+- אין צוות פיתוח אנושי, אין Figma, אין wireframes גרפיים, אין מעצב גרפי
+- משימות נכתבות כ-developer brief שמודבק ישירות ל-Claude Code
+- כל משימה חייבת להיות self-contained: קבצים, API, DB, acceptance criteria
+- ספריות מותקנות ע"י Claude Code דרך pnpm — אין כלים שדורשים GUI או setup ידני
+- Stack: TypeScript, React 18, Vite, Tailwind CSS, shadcn/ui, Express, Drizzle ORM, PostgreSQL
+- Font: Heebo (Hebrew-first) | Components: shadcn/ui (Radix-based)
+
+**הפרדת סביבות פיתוח:**
+הפרויקט מחולק ל-2 סביבות + שרת משותף:
+1. **Client (User-facing)** — \`client/src/\` (לא admin) — מה שהמשתמש רואה
+2. **Admin** — \`client/src/admin/\` — לוח ניהול לאדמינים
+3. **Server** — \`server/src/\` — API משותף לשניהם
+כל המלצה חייבת לציין את הסביבה: user | admin | both.
+כשמשפיע על שניהם — חייב לפרט מה משתנה בכל צד.`;
+
+// ── Design System Rules (injected for design & cpo departments) ──────────────
+
+const DESIGN_SYSTEM_RULES = `## 🎨 Design System — ADMIN_THEME_RULES.md (מקור אמת)
+
+### Dark Mode (ברירת מחדל — לא לשנות)
+| משתנה | ערך | שימוש |
+|-------|-----|-------|
+| --admin-bg-main | #0f172a | רקע ראשי |
+| --admin-bg-sidebar | rgba(30,41,59,0.98) | סיידבר |
+| --admin-bg-card | rgba(30,41,59,0.5) | כרטיסים |
+| --admin-bg-input | rgba(51,65,85,0.8) | שדות |
+| --admin-text | #f1f5f9 | טקסט ראשי |
+| --admin-text-muted | #94a3b8 | טקסט משני |
+| --admin-primary | #818cf8 | אינדיגו – פעולה ראשית |
+
+### Light Mode (override בלבד)
+| משתנה | ערך |
+|-------|-----|
+| --admin-bg-main | #f8f7fc |
+| --admin-bg-card | #ffffff |
+| --admin-text | #1e1b4b |
+| --admin-primary | #4f46e5 |
+
+### מחלקות CSS חובה
+| רכיב | מחלקות |
+|------|--------|
+| כרטיס | admin-card או bg-slate-800/50 |
+| קלט | admin-input |
+| כותרת | admin-page-title |
+| טקסט משני | admin-muted |
+| סמנטי | admin-text-success, admin-text-error, admin-text-warning |
+
+### רכיבי shadcn/ui זמינים
+Button, Card, Dialog, Table, Tabs, Select, Input, Badge, Tooltip, DropdownMenu, Sheet, Separator, Accordion, Alert, Checkbox, RadioGroup, Switch, Textarea, Progress
+
+### איסורים
+- **לא** dark: prefix (העיצוב הבסיסי הוא Dark)
+- **לא** לשנות Dark ישירות (רק override ב-admin-theme.css)
+- **לא** לבן טהור (#fff) ב-Light mode
+
+### כלל זהב
+כל המלצת עיצוב חייבת להיות code-actionable: שמות רכיבי shadcn/ui, משתני CSS, מחלקות Tailwind. **לא** mockups, **לא** Figma, **לא** wireframes גרפיים.`;
 
 // ── Department Configs ─────────────────────────────────────────────────────────
 
@@ -117,14 +196,15 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
     emoji: '⚙️',
     systemPrompt: `אתה CTO מנוסה עם עשור בפיתוח מערכות TypeScript/React/Node.js ו-PostgreSQL.
 תפקידך: לבחון היתכנות טכנית ולהמליץ על ארכיטקטורה.
-חשוב: קרא בעיון את הקוד הקיים המצורף לפני שאתה ממליץ – אל תסתור פטרנים קיימים.
+**חשוב:** הפיתוח מתבצע ע"י Claude Code AI — לוח זמנים מוערך לפי קצב פיתוח AI (שעות, לא שבועות). אין צוות אנושי.
+קרא בעיון את הקוד הקיים המצורף לפני שאתה ממליץ – אל תסתור פטרנים קיימים.
 ענה בעברית. פלט: Markdown מובנה.
 ## היתכנות טכנית
 ## ארכיטקטורה מוצעת (כולל דיאגרמת Mermaid)
 ## בחירות Tech Stack
 ## integration עם הקוד הקיים
 ## חוב טכני וסיכונים
-## לוח זמנים מוערך
+## לוח זמנים מוערך (בשעות AI, לא שבועות אנושיות)
 ## מערכות תומכות נדרשות
 **חובה** — כלול סעיף מפורט של כל המערכות החיצוניות הנדרשות:
 - שרתים ותשתית: hosting, CDN, DB (ספק, תוכנית, עלות חודשית)
@@ -155,12 +235,14 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
     emoji: '🔬',
     systemPrompt: `אתה ראש מחלקת R&D עם עומק טכני גבוה.
 תפקידך: לבצע מחקר טכני מעמיק – ספריות, repos ב-GitHub, גישות מימוש.
+**חשוב:** הפיתוח מתבצע ע"י Claude Code AI. ספריות חייבות להיות ניתנות להתקנה ע"י \`pnpm add\` — אין כלים שדורשים GUI, IDE plugins, או setup ידני.
+לכל ספרייה ציין פקודת התקנה מדויקת. דוגמאות קוד חייבות להיות TypeScript תואם לסטאק הקיים (React/Express/Drizzle).
 השתמש במקורות מהרשת שמצורפים כהכוונה, והוסף Trust Score לכל ספרייה.
 ענה בעברית. פלט: Markdown מובנה.
-## ספריות מומלצות (עם Trust Score וקישור)
+## ספריות מומלצות (עם Trust Score, קישור, ופקודת התקנה pnpm add)
 ## גישות מימוש (pros/cons לכל גישה)
 ## POC – הצעת Proof of Concept
-## דוגמת קוד ראשונית
+## דוגמת שילוב — קטע קוד TypeScript תואם סטאק קיים (React/Express/Drizzle)
 ## תלויות ומגבלות
 ## קישורי מחקר נוספים`,
     outputSections: ['ספריות', 'גישות מימוש', 'POC', 'קוד', 'תלויות'],
@@ -170,14 +252,20 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
     hebrewName: 'עיצוב UX/UI',
     emoji: '🎨',
     systemPrompt: `אתה Design Lead מתמחה ב-UX/UI עבור אפליקציות SaaS לבריאות, עם ידע עמוק ב-WCAG 2.1 AA ומגמות 2025.
+**חשוב:** הפיתוח מתבצע ע"י Claude Code AI — אין Figma, אין wireframes גרפיים, אין מעצב גרפי.
+כל המלצת עיצוב חייבת להיות code-actionable: שמות רכיבי shadcn/ui, משתני CSS (--admin-*), מחלקות Tailwind.
+הקפד להשתמש ב-Design System הקיים (ADMIN_THEME_RULES.md) — אל תמציא צבעים או רכיבים חדשים.
 ענה בעברית. פלט: Markdown מובנה.
 ## מגמות UX רלוונטיות 2025
-## Design System המלצות (צבעים, רכיבים, טיפוגרפיה)
+## Design System — הטמעה ב-ADMIN_THEME_RULES.md
+- צבעים: השתמש במשתני --admin-* הקיימים בלבד
+- רכיבים: shadcn/ui (Button, Card, Dialog, Table, Tabs, etc.)
+- Tailwind classes מומלצות לכל אלמנט
+## Component Mapping — אילו רכיבי shadcn/ui להשתמש
 ## Accessibility Checklist (WCAG 2.1 AA)
-## Wireframe Conceptual (תאר טקסטואלית)
 ## RTL Considerations (ממשק עברית)
-## Micro-interactions מוצעות`,
-    outputSections: ['מגמות UX', 'Design System', 'Accessibility', 'Wireframe', 'RTL'],
+## Micro-interactions (CSS transitions, Tailwind animate classes)`,
+    outputSections: ['מגמות UX', 'Design System', 'Component Mapping', 'Accessibility', 'RTL'],
   },
 
   product: {
@@ -185,10 +273,12 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
     emoji: '📋',
     systemPrompt: `אתה Product Manager מנוסה.
 תפקידך: לתרגם רעיון לתכנון ספרינט ברור עם User Stories מוגדרות היטב.
+**חשוב:** כל משימה מבוצעת ע"י Claude Code AI בתוך שעות — הערכות זמן בשעות, לא ימים/שבועות.
+לכל Story ציין סביבה: user (צד משתמש), admin (צד ניהול), או both (שניהם).
 ענה בעברית. פלט: Markdown מובנה.
-## User Stories (פורמט: Given/When/Then)
+## User Stories (פורמט: Given/When/Then + סביבה: user/admin/both)
 ## Acceptance Criteria לכל Story
-## Sprint Breakdown מוצע (1-2 ספרינטים)
+## Sprint Breakdown מוצע (1-2 ספרינטים, הערכת שעות AI)
 ## Definition of Done
 ## סיכוני ניהול מוצר`,
     outputSections: ['User Stories', 'Acceptance Criteria', 'Sprint Breakdown', 'DoD'],
@@ -291,16 +381,16 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
     hebrewName: 'משאבי אנוש (HR)',
     emoji: '👥',
     systemPrompt: `אתה VP HR / CHRO עם ניסיון בחברות SaaS בצמיחה.
-תפקידך: לבחון כל רעיון מזווית משאבי אנוש — האם יש Capacity, מי צריך לגייס, מה הסיכון לצוות.
+**חשוב:** הפיתוח מתבצע ע"י Claude Code AI — אין צוות פיתוח אנושי. Capacity Analysis מתייחס ליכולת ה-AI, לא לגיוס מפתחים.
+במקום "תפקידים חסרים" — התמקד: מה צריך מאנשים (PM, QA, DevOps, תמיכה) vs מה ה-AI מבצע לבד.
 ענה בעברית. פלט: Markdown מובנה.
-## Capacity Analysis — האם הצוות הנוכחי יכול?
-## תפקידים חסרים שצריך לגייס
+## Capacity Analysis — מה AI מבצע vs מה דורש אנשים?
+## תפקידים אנושיים נדרשים (PM, QA, DevOps, CS — לא מפתחים)
 ## לוח זמנים גיוס + Onboarding
-## Internal Mobility — מי מהצוות הקיים יכול להתאים
-## סיכוני Retention — האם מפתחי מפתח עלולים לעזוב
-## מבנה צוות מומלץ לפרויקט
-## Contractors / ספקים חיצוניים — השפעה על IP ו-NDA`,
-    outputSections: ['Capacity Analysis', 'תפקידים חסרים', 'לוח זמנים גיוס', 'Internal Mobility', 'סיכוני Retention', 'מבנה צוות'],
+## מבנה צוות מומלץ (AI + אנשים)
+## Contractors / ספקים חיצוניים — השפעה על IP ו-NDA
+## סיכוני תלות ב-AI — backup plan`,
+    outputSections: ['Capacity Analysis', 'תפקידים אנושיים', 'לוח זמנים', 'מבנה צוות', 'סיכוני תלות'],
   },
 
   cs: {
@@ -335,6 +425,77 @@ const DEPARTMENT_CONFIGS: Record<DepartmentId, DepartmentConfig> = {
 ## שיתופי פעולה — ארגוני דמנציה, בתי חולים, קופות חולים, עמותות
 ## מדדי מכירות: Conversion Rate צפוי, Pipeline Impact, Revenue Impact`,
     outputSections: ['Sales Impact', 'Sales Cycle', 'Pricing', 'Objection Handling', 'Channel Strategy', 'Partnerships', 'מדדי מכירות'],
+  },
+
+  'ai-dev': {
+    hebrewName: 'תרגום AI לפיתוח (AI Dev)',
+    emoji: '🤖',
+    systemPrompt: `אתה AI Development Architect — מומחה בתרגום מחקר רב-מחלקתי לתכנית פיתוח ב-Claude Code AI.
+
+**תפקידך:** לקחת את כל הפלט מכל המחלקות ולבנות brief פיתוח מובנה שמותאם לפיתוח בעזרת Claude Code / Cursor.
+
+**מודל פיתוח:**
+- כל הפיתוח מתבצע ע"י Claude Code AI — אין צוות אנושי
+- אין Figma, אין wireframes גרפיים, אין מעצב גרפי
+- Design = code-actionable (shadcn/ui components, Tailwind classes, CSS variables מ-ADMIN_THEME_RULES.md)
+- Stack: TypeScript, React 18, Vite, Tailwind CSS, shadcn/ui, Express, Drizzle ORM, PostgreSQL
+- Font: Heebo (Hebrew-first) | RTL: Full Hebrew support
+
+**מבנה הפרויקט — 5 שכבות:**
+| שכבה | environment | נתיב | תיאור |
+|------|-------------|-------|-------|
+| User Frontend | user-frontend | client/src/ (לא admin) | React UI למשתמשי קצה |
+| Admin Frontend | admin-frontend | client/src/admin/ | React UI לוח ניהול |
+| User Backend | user-backend | server/src/ (user routes) | API endpoints למשתמשים |
+| Admin Backend | admin-backend | server/src/ (adminRoutes) | API endpoints לאדמינים |
+| Server Core | server | server/src/ (services, DB, schemas) | לוגיקה, DB, background jobs |
+
+**פלט מבוקש — brief פיתוח AI מובנה:**
+ענה בעברית. פלט: Markdown מובנה.
+
+## סיכום פיתוח
+[2-3 משפטים: מה נדרש לפתח ולמה]
+
+## ארכיטקטורת הפתרון
+### מה כבר קיים בקוד (לא לפתח מחדש!)
+[רשימה מהקוד הקיים שאפשר לנצל — קבצים, פונקציות, רכיבים]
+### מה חדש לגמרי (צריך לפתח)
+[רשימה של פיצ'רים/רכיבים חדשים]
+
+## הפרדת שכבות — מה משתנה בכל שכבה
+### User Frontend (client/src/) — רק אם רלוונטי
+[רכיבי React, דפים, routing]
+### Admin Frontend (client/src/admin/) — רק אם רלוונטי
+[רכיבי admin, דפים חדשים, שינויים בקומפוננטות קיימות]
+### User Backend (server/src/) — רק אם רלוונטי
+[API endpoints חדשים למשתמשים]
+### Admin Backend (server/src/) — רק אם רלוונטי
+[API endpoints חדשים לאדמינים]
+### Database & Schema (shared/schemas/)
+[טבלאות חדשות, שדות חדשים, מיגרציות]
+### שירותים חיצוניים
+[APIs, integrations, ספריות npm, כלים נדרשים]
+
+## תלויות בין שכבות
+[מה ב-frontend תלוי ב-backend ולהפך. מה ב-admin תלוי ב-user]
+
+## סדר פיתוח מומלץ
+[1. DB schema → 2. Server API → 3. Admin UI → 4. User UI, וכו']
+
+## סיכוני פיתוח AI
+[מה יכול להיות מסובך ל-Claude Code, מה דורש תשומת לב מיוחדת, edge cases]
+
+## כלים ומערכות תומכות
+[ספריות npm להתקנה, שירותים חיצוניים, env variables נדרשים]`,
+    outputSections: [
+      'סיכום פיתוח',
+      'ארכיטקטורת הפתרון',
+      'הפרדת שכבות',
+      'תלויות בין שכבות',
+      'סדר פיתוח',
+      'סיכוני AI',
+      'כלים ומערכות',
+    ],
   },
 };
 
@@ -391,10 +552,23 @@ function buildAgentPrompt(opts: {
     ? `\n---\n\n## 🛠️ Skills רלוונטיים לפרויקט\n${nexusConfig.skills.map((s) => `- **${s.labelHe}** (\`${s.name}\`) — ${s.category}`).join('\n')}\n`
     : '';
 
-  // ── Team members block (dept-specific) ──
+  // ── Team members block (dept-specific, full CV) ──
   const deptTeam = nexusConfig?.teamMembers?.filter((m) => m.department === department) ?? [];
   const teamBlock = deptTeam.length > 0
-    ? `\n---\n\n## 👥 צוות המחלקה שלך\n${deptTeam.map((m) => `- **${m.roleHe}** (${m.level})${m.skills.length ? ': ' + m.skills.slice(0, 4).join(', ') : ''}`).join('\n')}\nקח בחשבון את יכולות הצוות בהמלצותיך.\n`
+    ? `\n---\n\n## 👥 צוות המחלקה שלך (${deptTeam.length} חברים)\n${deptTeam.map((m) => {
+        let line = `### ${m.roleHe} (${m.level})`;
+        if (m.experienceYears) line += ` — ${m.experienceYears} שנות ניסיון`;
+        if (m.bio) line += `\n${m.bio}`;
+        if (m.education) line += `\n- **השכלה:** ${m.education}`;
+        if (m.background) line += `\n- **רקע:** ${m.background.slice(0, 300)}`;
+        if (m.skills.length) line += `\n- **מומחיויות:** ${m.skills.join(', ')}`;
+        if (m.domainExpertise?.length) line += `\n- **תחומי דומיין:** ${m.domainExpertise.join(', ')}`;
+        if (m.responsibilities) line += `\n- **אחריות:** ${m.responsibilities}`;
+        if (m.methodology) line += `\n- **גישת עבודה:** ${m.methodology}`;
+        if (m.personality) line += ` | **סגנון:** ${m.personality}`;
+        if (m.certifications?.length) line += `\n- **הסמכות:** ${m.certifications.join(', ')}`;
+        return line;
+      }).join('\n\n')}\n\n> קח בחשבון את הרקע, הניסיון, המומחיויות וגישת העבודה של כל חבר צוות בהמלצותיך. התאם את ההצעות ליכולות ולניסיון הקיימים.\n`
     : '';
 
   const contextNotesBlock = contextNotes?.trim()
@@ -408,9 +582,18 @@ function buildAgentPrompt(opts: {
 
   const knowledgeBlock = deptKnowledge?.trim() || '';
 
-  return `# משימה: מחקר עבור הרעיון "${ideaPrompt}"
+  // Inject design system rules for design/cpo departments
+  const designSystemBlock = (department === 'design' || department === 'cpo')
+    ? `\n---\n\n${DESIGN_SYSTEM_RULES}\n`
+    : '';
+
+  const prompt = `# משימה: מחקר עבור הרעיון "${ideaPrompt}"
 תאריך: ${new Date().toLocaleDateString('he-IL')}
 ${contextNotesBlock}${platformsBlock}${teamBlock}${skillsBlock}${knowledgeBlock}
+---
+
+${CLAUDE_CODE_CONTEXT}
+${designSystemBlock}
 ---
 
 ## קוד הפרויקט הקיים (הקשר)
@@ -433,6 +616,14 @@ ${ideaPrompt}
 ---
 
 כעת בצע את המחקר שלך לפי תפקידך כ-${config.hebrewName}:`;
+
+  // Warn if prompt is very large (rough token estimate: ~3.5 chars per token for Hebrew)
+  const estimatedTokens = Math.round(prompt.length / 3.5);
+  if (estimatedTokens > 12000) {
+    console.warn(`[NEXUS] Prompt for ${department} is very large: ~${estimatedTokens} tokens (${prompt.length} chars). Risk of context window overflow.`);
+  }
+
+  return prompt;
 }
 
 // ── Run a single department agent ─────────────────────────────────────────────
@@ -541,7 +732,7 @@ export async function runAllDepartmentAgents(opts: {
   return settled.map((s, i) => {
     if (s.status === 'fulfilled') return s.value;
     return {
-      department: departments[i],
+      department: activeDepts[i],
       output: `> ❌ כישלון בלתי צפוי: ${s.reason}`,
       modelUsed: 'error',
       tokensUsed: 0,
@@ -588,4 +779,124 @@ export const ALL_DEPARTMENTS: { id: DepartmentId; hebrewName: string; emoji: str
   { id: 'hr', hebrewName: 'משאבי אנוש (HR)', emoji: '👥', description: 'Capacity, גיוס, retention, מבנה צוות' },
   { id: 'cs', hebrewName: 'הצלחת לקוחות (CS)', emoji: '🤝', description: 'Onboarding, churn prevention, NPS, support' },
   { id: 'sales', hebrewName: 'מכירות ופיתוח עסקי (Sales)', emoji: '💼', description: 'Sales cycle, pricing, channels, partnerships' },
+  { id: 'ai-dev', hebrewName: 'תרגום AI לפיתוח (AI Dev)', emoji: '🤖', description: 'תרגום מחקר לתכנית פיתוח Claude Code — רץ אחרון' },
 ];
+
+// ── AI Dev Translation — runs AFTER all departments, receives their outputs ──
+export async function runAIDevTranslation(opts: {
+  departmentResults: DepartmentResult[];
+  ideaPrompt: string;
+  codebaseContext: string;
+  models: AIProviderId[];
+  adminUserId?: string | null;
+  nexusConfig?: NexusConfig;
+  briefId?: string;
+}): Promise<DepartmentResult> {
+  const config = DEPARTMENT_CONFIGS['ai-dev'];
+  const systemPrompt = opts.nexusConfig?.deptSettings?.['ai-dev']?.systemPromptOverride?.trim()
+    || config.systemPrompt;
+
+  // Build user prompt from all department outputs
+  const deptOutputs = opts.departmentResults
+    .filter(r => !r.error && r.department !== 'ai-dev')
+    .map(r => {
+      const info = getDepartmentInfo(r.department);
+      return `## ${info.emoji} ${info.hebrewName}\n${r.output}`;
+    })
+    .join('\n\n---\n\n');
+
+  // Load additional context for AI-Dev: Q&A answers + skills + department knowledge
+  let qaBlock = '';
+  let aiDevKnowledge = '';
+  let skillsBlock = '';
+  try {
+    // Aggregate Q&A from ALL departments (not just ai-dev)
+    if (opts.briefId) {
+      const allDepts = opts.departmentResults.map(r => r.department).filter(d => d !== 'ai-dev');
+      const qaChunks = await Promise.all(
+        allDepts.map(d => getQAContextForDepartment(opts.briefId!, d).catch(() => ''))
+      );
+      const nonEmpty = qaChunks.filter(q => q.trim());
+      if (nonEmpty.length > 0) {
+        qaBlock = `\n---\n\n## שאלות ותשובות שנאספו מכל המחלקות\n${nonEmpty.join('\n\n')}\n`;
+      }
+    }
+    // Load AI-Dev department knowledge
+    aiDevKnowledge = await loadDeptKnowledge('ai-dev').catch(() => '');
+    // Load skills taxonomy
+    if (opts.nexusConfig?.skills?.length) {
+      skillsBlock = `\n---\n\n## Skills רלוונטיים לפרויקט\n${opts.nexusConfig.skills
+        .filter(s => s.isActive !== false)
+        .map(s => `- **${s.labelHe ?? s.name}** (\`${s.name}\`) — ${s.category}`)
+        .join('\n')}\n`;
+    }
+  } catch {
+    // Non-fatal — AI-Dev can still work without these
+  }
+
+  const userPrompt = `# הרעיון לפיתוח: ${opts.ideaPrompt}
+
+---
+
+## קוד הפרויקט הקיים (הקשר)
+${opts.codebaseContext.slice(0, 4000)}
+${aiDevKnowledge ? `\n---\n\n${aiDevKnowledge}` : ''}${qaBlock}${skillsBlock}
+
+---
+
+## ממצאי כל המחלקות (${opts.departmentResults.filter(r => !r.error).length} מחלקות)
+
+${deptOutputs}
+
+---
+
+כעת בצע את התרגום שלך: קח את כל ממצאי המחלקות למעלה ובנה brief פיתוח מובנה עבור Claude Code AI.
+שים לב במיוחד ל:
+1. הפרדה ברורה בין שכבות (user-frontend, admin-frontend, user-backend, admin-backend, server)
+2. מה כבר קיים בקוד ומה חדש
+3. סדר פיתוח מומלץ (DB → API → UI)
+4. סיכונים ספציפיים לפיתוח ע"י AI
+5. התייחס לתשובות ה-Q&A שנאספו למעלה — הן מכילות מידע קריטי מהאדמין`;
+
+  const preferredModels: AIProviderId[] = opts.models.length > 0
+    ? opts.models
+    : opts.nexusConfig?.deptSettings?.['ai-dev']?.defaultModel
+      ? [opts.nexusConfig.deptSettings['ai-dev'].defaultModel as AIProviderId]
+      : [];
+
+  try {
+    const result = await callAI(
+      'departmentAnalysis',
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      {
+        preferredModels: preferredModels.length > 0 ? preferredModels : undefined,
+        adminUserId: opts.adminUserId ?? undefined,
+        maxTokens: 3000,
+      }
+    );
+
+    return {
+      department: 'ai-dev' as DepartmentId,
+      output: result.content,
+      promptSnapshot: userPrompt,
+      modelUsed: result.model,
+      tokensUsed: result.tokensIn + result.tokensOut,
+      costUsd: result.costUsd,
+      fallbackReason: result.fallbackReason,
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return {
+      department: 'ai-dev' as DepartmentId,
+      output: `> ❌ שגיאה בתרגום AI: ${errorMsg}`,
+      promptSnapshot: userPrompt,
+      modelUsed: 'error',
+      tokensUsed: 0,
+      costUsd: 0,
+      error: errorMsg,
+    };
+  }
+}

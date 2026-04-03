@@ -427,6 +427,15 @@ nexusAdminRoutes.post('/nexus/briefs/:id/approve', requireAdmin, async (req, res
       .returning();
 
     res.json({ brief: updated });
+
+    // Trigger automation rules for brief_approved (non-blocking)
+    import('./nexusRulesEngine').then(({ evaluateRules }) => {
+      evaluateRules('brief_approved', {
+        briefId: id,
+        briefTitle: updated.title,
+        adminUserId: approvedBy ?? undefined,
+      }).catch(e => console.error('[nexus] rules evaluation error:', e));
+    });
   } catch (err) {
     console.error('[nexus] approve error:', err);
     res.status(500).json({ error: 'Failed to approve brief' });
@@ -453,6 +462,14 @@ nexusAdminRoutes.post('/nexus/briefs/:id/reject', requireAdmin, async (req, res)
       .returning();
 
     res.json({ brief: updated });
+
+    // Trigger automation rules for brief_rejected (non-blocking)
+    import('./nexusRulesEngine').then(({ evaluateRules }) => {
+      evaluateRules('brief_rejected', {
+        briefId: id,
+        briefTitle: updated.title,
+      }).catch(e => console.error('[nexus] rules evaluation error:', e));
+    });
   } catch (err) {
     console.error('[nexus] reject error:', err);
     res.status(500).json({ error: 'Failed to reject brief' });

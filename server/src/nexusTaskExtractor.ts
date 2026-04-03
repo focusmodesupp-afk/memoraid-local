@@ -10,6 +10,7 @@ export type ExtractedTask = {
   category: string;
   skillTags: string[];
   sourceDepartment: string;
+  environment: 'user-frontend' | 'user-backend' | 'admin-frontend' | 'admin-backend' | 'server' | 'fullstack';
   contextJson?: {
     webSourceIds?: string[];
     departmentId?: string;
@@ -19,22 +20,55 @@ export type ExtractedTask = {
 
 const EXTRACT_SYSTEM_PROMPT = `You are a senior engineering manager. Extract concrete, implementation-ready development tasks from a research brief and specification documents.
 
+IMPORTANT — DEVELOPMENT MODEL:
+All development is done by Claude Code AI (not human developers). There is NO graphic designer, NO Figma, NO wireframes.
+Tasks are developer briefs pasted directly into Claude Code / Cursor. Each task must be self-contained.
+Stack: TypeScript, React 18, Vite, Tailwind CSS, shadcn/ui, Express, Drizzle ORM, PostgreSQL.
+Design tasks = code-actionable instructions (CSS variables, Tailwind classes, shadcn/ui component names), NOT visual mockups.
+
 CRITICAL: Write ALL task titles and descriptions in HEBREW (עברית). Do NOT use English for titles or descriptions.
-skillTags and category values stay in English (they are technical identifiers).
+skillTags, category, and environment values stay in English (they are technical identifiers).
 
 Rules:
-- Extract 40-80 actionable tasks — be VERY thorough. A real project needs MANY tasks. Cover ALL departments in the brief
+- Extract 20-40 actionable tasks — be thorough but CONSOLIDATE related tasks. Quality over quantity
 - Each task must be actionable and specific (not vague)
 - Estimate hours realistically (1-40h per task, split if larger)
 - Priority: urgent=critical blocker, high=sprint goal, medium=important, low=nice-to-have
 - Categories (English): feature, bug, refactor, infrastructure, design, documentation, security, research
-- skillTags (English): pick from [react, nodejs, postgresql, ai-integration, security-review, legal-review, design-system, devops, api-design, mobile, testing]
-- sourceDepartment: which department's analysis this task comes from (use English dept name: ceo, cto, cpo, product, rnd, design, security, legal, marketing, finance)
+- skillTags (English): pick from [react, nodejs, postgresql, ai-integration, security-review, legal-review, design-system, devops, api-design, mobile, testing, healthcare, hebrew-rtl]
+- sourceDepartment: which department's analysis this task comes from (use English dept name: ceo, cto, cpo, product, rd, design, security, legal, marketing, finance, hr, cs, sales, ai-dev)
 - Cover tasks from ALL sections: Product, R&D, Design, CTO, CEO, Marketing, Legal, Security, Finance
 - Do NOT skip legal, security, marketing or finance tasks
 
+ENVIRONMENT CLASSIFICATION (MANDATORY):
+Every task MUST include an "environment" field:
+- "user-frontend" — React UI for end users (client/src/ excluding admin/)
+- "user-backend" — Server API routes serving end users (server/src/)
+- "admin-frontend" — Admin panel React UI (client/src/admin/)
+- "admin-backend" — Server API routes for admin (server/src/ adminRoutes)
+- "server" — Server-only logic, DB schema, services, background jobs (server/src/)
+- "fullstack" — Spans multiple layers (frontend + backend + possibly admin)
+When environment is "fullstack", the description MUST include separate sub-sections:
+  ### Frontend
+  [what changes in React components — specify user vs admin]
+  ### Backend
+  [what changes in server/API — specify user vs admin endpoints]
+  ### Database
+  [schema changes if any]
+
+CONSOLIDATION RULES (MANDATORY):
+- Before outputting, scan ALL tasks for duplicates and cross-department overlaps
+- If 2+ tasks address the same mechanism (e.g. "add breadcrumbs to page X" and "add breadcrumbs to page Y") — merge into ONE task with sub-steps
+- Do NOT create separate tasks per page when a pattern repeats — create one global task
+- If Design + Product + R&D all mention the same component — merge into ONE combined task
+- In merged task descriptions, list clear steps:
+  ### שלבים
+  1. [step 1]
+  2. [step 2]
+  ...
+
 CRITICAL — DESCRIPTION FORMAT:
-Each description MUST be a complete developer brief in Markdown. A developer (Claude Code AI) must be able to implement the task FROM THE DESCRIPTION ALONE, without reading any other document.
+Each description MUST be a complete developer brief in Markdown. Claude Code AI must be able to implement the task FROM THE DESCRIPTION ALONE, without reading any other document.
 Use this exact structure:
 
 ## מה לעשות
@@ -83,7 +117,8 @@ CRITICAL JSON RULES:
     "estimateHours": 8,
     "category": "feature",
     "skillTags": ["react", "nodejs"],
-    "sourceDepartment": "product"
+    "sourceDepartment": "product",
+    "environment": "admin-frontend"
   }
 ]`;
 
@@ -268,9 +303,10 @@ export async function saveExtractedTasks(
     // Convert JS array to PostgreSQL array literal string, then cast with ::text[]
     const skillTagsStr = '{' + (t.skillTags ?? []).join(',') + '}';
     const contextJsonStr = t.contextJson ? JSON.stringify(t.contextJson) : null;
+    const env = t.environment ?? 'admin';
     const res = await db.execute(sql`
       INSERT INTO nexus_extracted_tasks
-        (brief_id, title, description, priority, estimate_hours, category, skill_tags, source_department, position, context_json)
+        (brief_id, title, description, priority, estimate_hours, category, skill_tags, source_department, environment, position, context_json)
       VALUES (
         ${briefId},
         ${t.title},
@@ -280,6 +316,7 @@ export async function saveExtractedTasks(
         ${t.category ?? 'feature'},
         ${skillTagsStr}::text[],
         ${t.sourceDepartment ?? 'product'},
+        ${env},
         ${i},
         ${contextJsonStr}::jsonb
       )
@@ -288,6 +325,17 @@ export async function saveExtractedTasks(
     const row = (res as any).rows?.[0] ?? (res as any)[0];
     if (row) rows.push(row);
   }
+
+  // Trigger automation rules for task_created (non-blocking)
+  if (rows.length > 0) {
+    import('./nexusRulesEngine').then(({ evaluateRules }) => {
+      evaluateRules('task_created', {
+        briefId,
+        taskCount: rows.length,
+      }).catch(e => console.error('[nexus] rules evaluation error:', e));
+    });
+  }
+
   return rows;
 }
 
@@ -298,13 +346,13 @@ export async function createSprintFromBrief(opts: {
   sprintGoal: string;
   phaseId?: string | null;
   taskIds: string[];
-}): Promise<{ sprintId: string; tasksCreated: number }> {
-  const { briefId, briefTitle, sprintName, sprintGoal, phaseId, taskIds } = opts;
+}): Promise<{ sprintId: string; tasksLinked: number }> {
+  const { briefId, sprintName, sprintGoal, phaseId, taskIds } = opts;
 
   // Get accepted extracted tasks
   const taskIdsLiteral = '{' + taskIds.join(',') + '}';
   const extractRes = await db.execute(sql`
-    SELECT * FROM nexus_extracted_tasks
+    SELECT id FROM nexus_extracted_tasks
     WHERE brief_id = ${briefId}
       AND id = ANY(${taskIdsLiteral}::uuid[])
       AND accepted = true
@@ -316,103 +364,28 @@ export async function createSprintFromBrief(opts: {
     throw new Error('No accepted tasks found for sprint creation');
   }
 
-  // Load NEXUS context data for enrichment (with catch guards for missing tables)
-  const [webSourcesRes, deptOutputsRes, genDocsRes] = await Promise.all([
-    db.execute(sql`SELECT id, source_type, url, title, trust_score FROM nexus_brief_web_sources WHERE brief_id = ${briefId} ORDER BY trust_score DESC NULLS LAST`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT id, department, output FROM nexus_brief_departments WHERE brief_id = ${briefId} AND status IN ('done', 'completed')`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT doc_type, title FROM nexus_generated_docs WHERE brief_id = ${briefId} ORDER BY created_at`).catch(() => ({ rows: [] })),
-  ]);
-  const webSourceMap = new Map(((webSourcesRes as any).rows ?? []).map((s: any) => [s.id, s]));
-  const deptOutputMap = new Map(((deptOutputsRes as any).rows ?? []).map((d: any) => [d.department, d]));
-  const docRefs: Array<{ docType: string; title: string }> = ((genDocsRes as any).rows ?? []).map((d: any) => ({ docType: d.doc_type, title: d.title }));
-
-  // Create sprint
+  // Create sprint (status=planning, NO dev_tasks yet — those are created on "start sprint")
   const startDate = new Date();
   const endDate = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000); // 2 weeks
 
   const sprintRes = await db.execute(sql`
-    INSERT INTO sprints (name, goal, status, start_date, end_date, phase_id)
+    INSERT INTO sprints (name, goal, status, start_date, end_date, phase_id, brief_id)
     VALUES (${sprintName}, ${sprintGoal}, 'planning',
             ${startDate.toISOString().split('T')[0]},
             ${endDate.toISOString().split('T')[0]},
-            ${phaseId ?? null})
+            ${phaseId ?? null}, ${briefId})
     RETURNING id
   `);
   const sprint = (sprintRes as any).rows?.[0] ?? (sprintRes as any)[0];
   const sprintId = sprint?.id;
 
-  // Get or create Backlog column
-  const colRes = await db.execute(sql`SELECT id FROM dev_columns WHERE name ILIKE 'backlog' LIMIT 1`);
-  let backlogCol = (colRes as any).rows?.[0] ?? (colRes as any)[0];
-  if (!backlogCol) {
-    const newColRes = await db.execute(sql`
-      INSERT INTO dev_columns (name, position, color)
-      VALUES ('Backlog', 0, '#64748b')
-      RETURNING id
-    `);
-    backlogCol = (newColRes as any).rows?.[0] ?? (newColRes as any)[0];
-  }
-  const columnId = backlogCol?.id;
-
-  // Create dev_tasks and link to sprint
-  let tasksCreated = 0;
+  // Link extracted tasks to this sprint (but don't create dev_tasks yet)
   for (const et of extractedRows) {
-    // Convert skill_tags (JS array from DB) to PostgreSQL array literal
-    const rawTags = et.skill_tags;
-    const tagsArr: string[] = Array.isArray(rawTags)
-      ? rawTags
-      : typeof rawTags === 'string' && rawTags.startsWith('{')
-        ? rawTags.slice(1, -1).split(',').filter(Boolean)
-        : [];
-    const labelsStr = '{' + tagsArr.join(',') + '}';
-
-    // Build nexus_context JSONB for the dev_task
-    const contextData = et.context_json ?? {};
-    const resolvedWebSources = (contextData.webSourceIds ?? [])
-      .map((wsId: string) => webSourceMap.get(wsId))
-      .filter(Boolean)
-      .map((s: any) => ({ id: s.id, sourceType: s.source_type, url: s.url, title: s.title, trustScore: s.trust_score }));
-    const deptInfo = deptOutputMap.get(et.source_department);
-    const nexusCtx = {
-      briefId,
-      briefTitle,
-      sourceDepartment: et.source_department ?? null,
-      webSources: resolvedWebSources.length > 0 ? resolvedWebSources : undefined,
-      departmentExcerpt: deptInfo?.output ? (deptInfo.output as string).slice(0, 500) : undefined,
-      docReferences: docRefs.length > 0 ? docRefs : undefined,
-    };
-    const nexusCtxStr = JSON.stringify(nexusCtx);
-
-    const devTaskRes = await db.execute(sql`
-      INSERT INTO dev_tasks
-        (title, description, priority, column_id, category, estimate_hours, labels, ai_generated, nexus_context)
-      VALUES (
-        ${et.title},
-        ${et.description ?? ''},
-        ${et.priority ?? 'medium'},
-        ${columnId},
-        ${et.category ?? 'feature'},
-        ${et.estimate_hours ?? 4},
-        ${labelsStr}::text[],
-        true,
-        ${nexusCtxStr}::jsonb
-      )
-      RETURNING id
+    await db.execute(sql`
+      UPDATE nexus_extracted_tasks
+      SET sprint_id = ${sprintId}
+      WHERE id = ${et.id}
     `);
-    const devTask = (devTaskRes as any).rows?.[0] ?? (devTaskRes as any)[0];
-    if (devTask?.id) {
-      await db.execute(sql`
-        INSERT INTO sprint_tasks (sprint_id, task_id) VALUES (${sprintId}, ${devTask.id})
-        ON CONFLICT DO NOTHING
-      `);
-      // Update extracted task with dev_task_id
-      await db.execute(sql`
-        UPDATE nexus_extracted_tasks
-        SET dev_task_id = ${devTask.id}, sprint_id = ${sprintId}
-        WHERE id = ${et.id}
-      `);
-      tasksCreated++;
-    }
   }
 
   // Update brief
@@ -422,7 +395,128 @@ export async function createSprintFromBrief(opts: {
     WHERE id = ${briefId}
   `);
 
-  return { sprintId, tasksCreated };
+  return { sprintId, tasksLinked: extractedRows.length };
+}
+
+// ── Activate sprint: create dev_tasks from extracted tasks and push to kanban ──
+export async function activateSprintTasks(sprintId: string): Promise<{ tasksCreated: number }> {
+  // Load sprint to get briefId
+  const sprintRes = await db.execute(sql`SELECT id, brief_id, status FROM sprints WHERE id = ${sprintId}`);
+  const sprint = (sprintRes as any).rows?.[0];
+  if (!sprint) throw new Error('Sprint not found');
+  if (sprint.status !== 'planning') throw new Error('Sprint must be in planning status to start');
+
+  const briefId = sprint.brief_id;
+
+  // Load extracted tasks linked to this sprint
+  const extractRes = await db.execute(sql`
+    SELECT * FROM nexus_extracted_tasks
+    WHERE sprint_id = ${sprintId} AND accepted = true AND dev_task_id IS NULL
+    ORDER BY position
+  `);
+  const extractedRows: any[] = (extractRes as any).rows ?? [];
+  if (extractedRows.length === 0) throw new Error('No pending tasks found for this sprint');
+
+  // Load NEXUS context data for enrichment
+  const [webSourcesRes, deptOutputsRes, genDocsRes] = await Promise.all([
+    briefId ? db.execute(sql`SELECT id, source_type, url, title, trust_score FROM nexus_brief_web_sources WHERE brief_id = ${briefId} ORDER BY trust_score DESC NULLS LAST`).catch(() => ({ rows: [] })) : Promise.resolve({ rows: [] }),
+    briefId ? db.execute(sql`SELECT id, department, output FROM nexus_brief_departments WHERE brief_id = ${briefId} AND status = 'completed'`).catch(() => ({ rows: [] })) : Promise.resolve({ rows: [] }),
+    briefId ? db.execute(sql`SELECT doc_type, title FROM nexus_generated_docs WHERE brief_id = ${briefId} ORDER BY created_at`).catch(() => ({ rows: [] })) : Promise.resolve({ rows: [] }),
+  ]);
+  const webSourceMap = new Map(((webSourcesRes as any).rows ?? []).map((s: any) => [s.id, s]));
+  const deptOutputMap = new Map(((deptOutputsRes as any).rows ?? []).map((d: any) => [d.department, d]));
+  const docRefs = ((genDocsRes as any).rows ?? []).map((d: any) => ({ docType: d.doc_type, title: d.title }));
+
+  // Get brief title
+  let briefTitle = '';
+  if (briefId) {
+    const briefRes = await db.execute(sql`SELECT idea_prompt FROM nexus_briefs WHERE id = ${briefId}`);
+    briefTitle = (briefRes as any).rows?.[0]?.idea_prompt?.slice(0, 100) ?? '';
+  }
+
+  // Get or create Backlog column
+  const colRes = await db.execute(sql`SELECT id FROM dev_columns WHERE name ILIKE 'backlog' LIMIT 1`);
+  let backlogCol = (colRes as any).rows?.[0];
+  if (!backlogCol) {
+    const newColRes = await db.execute(sql`INSERT INTO dev_columns (name, position, color) VALUES ('Backlog', 0, '#64748b') RETURNING id`);
+    backlogCol = (newColRes as any).rows?.[0];
+  }
+  const columnId = backlogCol?.id;
+
+  // Create dev_tasks and link to sprint
+  let tasksCreated = 0;
+  let taskOrder = 0;
+  for (const et of extractedRows) {
+    taskOrder++;
+    const rawTags = et.skill_tags;
+    const tagsArr: string[] = Array.isArray(rawTags) ? rawTags
+      : typeof rawTags === 'string' && rawTags.startsWith('{')
+        ? rawTags.slice(1, -1).split(',').filter(Boolean) : [];
+    const labelsStr = '{' + tagsArr.join(',') + '}';
+
+    // Build nexus_context
+    const contextData = et.context_json ?? {};
+    const resolvedWebSources = (contextData.webSourceIds ?? [])
+      .map((wsId: string) => webSourceMap.get(wsId)).filter(Boolean)
+      .map((s: any) => ({ id: s.id, sourceType: s.source_type, url: s.url, title: s.title, trustScore: s.trust_score }));
+    const deptInfo = deptOutputMap.get(et.source_department);
+
+    // Filter docReferences per task — only include docs relevant to this task's department/category
+    const DOC_RELEVANCE: Record<string, string[]> = {
+      ceo: ['prd', 'marketing'], cto: ['blueprint', 'erd', 'cicd'], cpo: ['prd', 'design'],
+      rd: ['blueprint', 'erd'], design: ['design', 'prd'], product: ['prd'],
+      security: ['security', 'blueprint'], legal: ['legal'], marketing: ['marketing'],
+      finance: ['prd'], hr: ['prd'], cs: ['prd', 'design'], sales: ['marketing', 'prd'],
+      'ai-dev': ['blueprint', 'erd', 'cicd', 'prd'],
+    };
+    const CAT_RELEVANCE: Record<string, string[]> = {
+      feature: ['prd', 'design', 'blueprint'], bug: ['blueprint', 'erd'],
+      refactor: ['blueprint', 'erd'], infrastructure: ['blueprint', 'cicd', 'erd'],
+      design: ['design', 'prd'], security: ['security', 'blueprint'],
+      documentation: ['prd'], research: ['prd', 'blueprint'],
+    };
+    const relevantDocTypes = new Set([
+      ...(DOC_RELEVANCE[et.source_department ?? ''] ?? []),
+      ...(CAT_RELEVANCE[et.category ?? ''] ?? []),
+    ]);
+    const filteredDocRefs = docRefs.filter((d: { docType: string }) => relevantDocTypes.has(d.docType));
+
+    const nexusCtx = JSON.stringify({
+      briefId, briefTitle, sourceDepartment: et.source_department ?? null,
+      webSources: resolvedWebSources.length > 0 ? resolvedWebSources : undefined,
+      departmentExcerpt: deptInfo?.output ? (deptInfo.output as string).slice(0, 500) : undefined,
+      docReferences: filteredDocRefs.length > 0 ? filteredDocRefs : undefined,
+    });
+
+    const devTaskRes = await db.execute(sql`
+      INSERT INTO dev_tasks
+        (title, description, priority, column_id, sprint_id, category, estimate_hours, labels, environment, ai_generated, nexus_context)
+      VALUES (
+        ${et.title}, ${et.description ?? ''}, ${et.priority ?? 'medium'}, ${columnId}, ${sprintId},
+        ${et.category ?? 'feature'}, ${et.estimate_hours ?? 4}, ${labelsStr}::text[],
+        ${et.environment ?? 'admin'}, true, ${nexusCtx}::jsonb
+      )
+      RETURNING id
+    `);
+    const devTaskId = (devTaskRes as any).rows?.[0]?.id;
+    if (devTaskId) {
+      await db.execute(sql`
+        INSERT INTO sprint_tasks (sprint_id, task_id, task_order) VALUES (${sprintId}, ${devTaskId}, ${taskOrder})
+        ON CONFLICT DO NOTHING
+      `);
+      await db.execute(sql`
+        UPDATE nexus_extracted_tasks SET dev_task_id = ${devTaskId} WHERE id = ${et.id}
+      `);
+      tasksCreated++;
+    }
+  }
+
+  // Activate sprint
+  await db.execute(sql`
+    UPDATE sprints SET status = 'active', start_date = now(), updated_at = now() WHERE id = ${sprintId}
+  `);
+
+  return { tasksCreated };
 }
 
 // ── Smart multi-sprint creation ──────────────────────────────────────────────
@@ -459,25 +553,6 @@ export async function createSprintsFromBrief(opts: {
     sprintChunks.push(allTasks.slice(i, i + tasksPerSprint));
   }
 
-  // Load NEXUS context
-  const [webSourcesRes, deptOutputsRes, genDocsRes] = await Promise.all([
-    db.execute(sql`SELECT id, source_type, url, title, trust_score FROM nexus_brief_web_sources WHERE brief_id = ${briefId} ORDER BY trust_score DESC NULLS LAST`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT id, department, output FROM nexus_brief_departments WHERE brief_id = ${briefId} AND status IN ('done', 'completed')`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT doc_type, title FROM nexus_generated_docs WHERE brief_id = ${briefId} ORDER BY created_at`).catch(() => ({ rows: [] })),
-  ]);
-  const webSourceMap = new Map(((webSourcesRes as any).rows ?? []).map((s: any) => [s.id, s]));
-  const deptOutputMap = new Map(((deptOutputsRes as any).rows ?? []).map((d: any) => [d.department, d]));
-  const docRefs = ((genDocsRes as any).rows ?? []).map((d: any) => ({ docType: d.doc_type, title: d.title }));
-
-  // Get or create Backlog column
-  const colRes = await db.execute(sql`SELECT id FROM dev_columns WHERE name ILIKE 'backlog' LIMIT 1`);
-  let backlogCol = (colRes as any).rows?.[0];
-  if (!backlogCol) {
-    const newColRes = await db.execute(sql`INSERT INTO dev_columns (name, position, color) VALUES ('Backlog', 0, '#64748b') RETURNING id`);
-    backlogCol = (newColRes as any).rows?.[0];
-  }
-  const columnId = backlogCol?.id;
-
   const results: Array<{ sprintId: string; name: string; taskCount: number; totalHours: number; sprintOrder: number }> = [];
   let firstSprintId: string | null = null;
 
@@ -488,10 +563,10 @@ export async function createSprintsFromBrief(opts: {
     const sprintName = `${briefTitle} — Sprint ${sprintOrder}`;
     const totalHours = chunk.reduce((sum: number, t: any) => sum + (t.estimate_hours ?? 4), 0);
     const workDays = Math.ceil(totalHours / 6);
-    const durationDays = Math.max(14, Math.ceil(workDays / 5) * 7); // At least 2 weeks
+    const durationDays = Math.max(14, Math.ceil(workDays / 5) * 7);
 
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() + (si * 14)); // Each sprint starts 2 weeks after previous
+    startDate.setDate(startDate.getDate() + (si * 14));
     const endDate = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
     const sprintGoal = `Sprint ${sprintOrder}: ${priorities.join(', ')} priority — ${chunk.length} tasks, ~${totalHours}h estimated`;
@@ -507,44 +582,11 @@ export async function createSprintsFromBrief(opts: {
     const sprintId = (sprintRes as any).rows?.[0]?.id;
     if (!firstSprintId) firstSprintId = sprintId;
 
-    // Create dev_tasks for this sprint
-    let taskOrder = 0;
+    // Link extracted tasks to sprint (NO dev_tasks yet — created on "start sprint")
     for (const et of chunk) {
-      taskOrder++;
-      const tagsArr = Array.isArray(et.skill_tags) ? et.skill_tags
-        : typeof et.skill_tags === 'string' && et.skill_tags.startsWith('{')
-          ? et.skill_tags.slice(1, -1).split(',').filter(Boolean) : [];
-      const labelsStr = '{' + tagsArr.join(',') + '}';
-
-      // Build nexus context
-      const contextData = et.context_json ?? {};
-      const resolvedWebSources = (contextData.webSourceIds ?? [])
-        .map((wsId: string) => webSourceMap.get(wsId)).filter(Boolean)
-        .map((s: any) => ({ id: s.id, sourceType: s.source_type, url: s.url, title: s.title, trustScore: s.trust_score }));
-      const deptInfo = deptOutputMap.get(et.source_department);
-      const nexusCtx = JSON.stringify({
-        briefId, briefTitle, sourceDepartment: et.source_department ?? null,
-        webSources: resolvedWebSources.length > 0 ? resolvedWebSources : undefined,
-        departmentExcerpt: deptInfo?.output ? (deptInfo.output as string).slice(0, 500) : undefined,
-        docReferences: docRefs.length > 0 ? docRefs : undefined,
-      });
-
-      const devTaskRes = await db.execute(sql`
-        INSERT INTO dev_tasks (title, description, priority, column_id, category, estimate_hours, labels, ai_generated, nexus_context)
-        VALUES (${et.title}, ${et.description ?? ''}, ${et.priority ?? 'medium'}, ${columnId},
-                ${et.category ?? 'feature'}, ${et.estimate_hours ?? 4}, ${labelsStr}::text[], true, ${nexusCtx}::jsonb)
-        RETURNING id
+      await db.execute(sql`
+        UPDATE nexus_extracted_tasks SET sprint_id = ${sprintId} WHERE id = ${et.id}
       `);
-      const devTaskId = (devTaskRes as any).rows?.[0]?.id;
-      if (devTaskId) {
-        await db.execute(sql`
-          INSERT INTO sprint_tasks (sprint_id, task_id, task_order) VALUES (${sprintId}, ${devTaskId}, ${taskOrder})
-          ON CONFLICT DO NOTHING
-        `);
-        await db.execute(sql`
-          UPDATE nexus_extracted_tasks SET dev_task_id = ${devTaskId}, sprint_id = ${sprintId} WHERE id = ${et.id}
-        `);
-      }
     }
 
     results.push({ sprintId, name: sprintName, taskCount: chunk.length, totalHours, sprintOrder });

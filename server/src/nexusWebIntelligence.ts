@@ -161,16 +161,29 @@ const DEPT_REDDIT_SUBREDDITS: Record<string, string[]> = {
   security:  ['netsec', 'cybersecurity', 'privacy'],
   legal:     ['gdpr', 'legaladvice', 'privacylegal'],
   marketing: ['marketing', 'SEO', 'content_marketing'],
+  finance:   ['personalfinance', 'financialindependence', 'smallbusiness'],
+  hr:        ['humanresources', 'remotework', 'careerguidance'],
+  cs:        ['customerservice', 'helpdesk', 'cscareerquestions'],
+  sales:     ['sales', 'Entrepreneur', 'SaaS'],
+  'ai-dev':  ['MachineLearning', 'LocalLLaMA', 'ClaudeAI'],
 };
 
 async function fetchDeptRedditSources(dept: string, query: string): Promise<WebSource[]> {
   const subreddits = DEPT_REDDIT_SUBREDDITS[dept] ?? [];
   if (subreddits.length === 0) return [];
 
-  // Search the first subreddit for this dept (to avoid too many requests)
-  const subreddit = subreddits[0];
-  const results = await fetchRedditSources(query, subreddit);
-  return results.map((s) => ({ ...s, department: dept }));
+  // Search up to 2 subreddits per department for richer community intelligence
+  const toSearch = subreddits.slice(0, 2);
+  const allResults: WebSource[] = [];
+  for (const subreddit of toSearch) {
+    try {
+      const results = await fetchRedditSources(query, subreddit);
+      allResults.push(...results.map((s) => ({ ...s, department: dept })));
+    } catch {
+      // Individual subreddit failure is non-fatal
+    }
+  }
+  return allResults;
 }
 
 // ── DB Feed Loader ─────────────────────────────────────────────────────────────
@@ -543,12 +556,11 @@ export async function gatherWebIntelligence(
     activeGithubQueries = dbGithub.map((f) => f.url);
   }
 
-  // Build per-department Reddit fetches
+  // Build per-department Reddit fetches (searches up to 2 subreddits per dept)
   const deptRedditFetches = departments
     ? departments
         .filter((d) => activeRedditSubreddits[d]?.length)
-        .map((d) => fetchRedditSources(ideaPrompt, activeRedditSubreddits[d][0]))
-        .map((p, i) => p.then((sources) => sources.map((s) => ({ ...s, department: departments[i] }))))
+        .map((d) => fetchDeptRedditSources(d, ideaPrompt))
     : [];
 
   // Additional GitHub searches from DB (up to 2 extra, relevant to ideaPrompt)
