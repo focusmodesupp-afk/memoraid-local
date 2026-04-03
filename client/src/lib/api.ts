@@ -50,6 +50,34 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   return data as T;
 }
 
+/**
+ * Raw fetch that returns the Response object without consuming the body.
+ * Use for SSE/streaming endpoints where you need resp.body.getReader().
+ */
+export async function apiFetchRaw(path: string, options?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string> ?? {}),
+  };
+  if (typeof window !== 'undefined') {
+    const activeFamily = localStorage.getItem('mr_active_family');
+    if (activeFamily) headers['X-Active-Family'] = activeFamily;
+  }
+  if (isDevBypassActive() && path.startsWith('/admin')) {
+    headers['X-Dev-Bypass'] = '1';
+  }
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers,
+    ...options,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(text || res.statusText || 'Request failed', res.status);
+  }
+  return res;
+}
+
 /** Upload file to admin AI – multipart/form-data, returns { mediaId, url, originalName, mimeType, sizeBytes, type } */
 export async function apiUploadAdminFile(path: string, file: File): Promise<{
   mediaId: string;

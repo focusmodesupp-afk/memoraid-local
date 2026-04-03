@@ -15,7 +15,7 @@ import {
   Loader2, CheckCircle, XCircle, AlertCircle, Play, RotateCcw, Zap,
   ChevronDown, ChevronUp, Users, Crown, Briefcase, Code2,
 } from 'lucide-react';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, apiFetchRaw } from '../../lib/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,33 +111,13 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
     setActiveRound(roundNumber);
     setExpandedRound(roundNumber);
 
-    // Close previous SSE if any
-    if (esRef.current) esRef.current.close();
-
     try {
-      // Start SSE for round
-      const es = new EventSource(
-        `/api/admin/nexus/briefs/${briefId}/run-round?roundNumber=${roundNumber}&models=${brief.selectedModels.join(',')}`,
-        { withCredentials: true },
-      );
-      esRef.current = es;
-
-      // We can't use GET with body for SSE, so use POST then connect to SSE
-      // Actually, run-round is POST with SSE response. Let's use fetch instead.
-      es.close();
-      esRef.current = null;
-
-      // Use fetch with streaming
-      const resp = await apiFetch(`/api/admin/nexus/briefs/${briefId}/run-round`, {
+      // Use raw fetch (not apiFetch) to preserve streaming body for SSE
+      const resp = await apiFetchRaw(`/admin/nexus/briefs/${briefId}/run-round`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roundNumber, models: brief.selectedModels }),
       });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
 
       // Parse SSE from response body
       const reader = resp.body?.getReader();
@@ -153,12 +133,17 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 
+        let currentEventType = '';
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith('event: ')) {
+            currentEventType = line.slice(7).trim();
+          } else if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
+              data.type = data.type || currentEventType;
               handleRoundEvent(roundNumber, data);
             } catch { /* ignore parse errors */ }
+            currentEventType = '';
           }
         }
       }
