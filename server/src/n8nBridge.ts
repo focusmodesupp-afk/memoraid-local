@@ -514,6 +514,31 @@ export async function triggerPerDeptResearch(
     totalSourcesFound += sources.length;
   });
 
+  // If N8N returned 0 sources for any dept, retry those with direct fallback
+  if (useN8N) {
+    const emptyDepts = deptContexts.filter(ctx => (perDeptSources.get(ctx.department)?.length ?? 0) === 0);
+    if (emptyDepts.length > 0) {
+      console.log(`[n8nBridge] N8N returned empty for ${emptyDepts.length} depts, retrying with direct fallback`);
+      // Fetch shared GitHub for direct path
+      if (!sharedGitHub) {
+        try {
+          const { fetchGitHubSources } = await import('./nexusWebIntelligence');
+          const { buildDeptSearchQueries: buildQ } = await import('./nexusDeptResearchConfig');
+          const ghQuery = buildQ(emptyDepts[0].department, ideaPrompt, [], []).githubQuery;
+          sharedGitHub = await fetchGitHubSources(ghQuery);
+        } catch { sharedGitHub = []; }
+      }
+      const retryTasks = emptyDepts.map(ctx => () => directDeptResearch(ideaPrompt, ctx, sharedGitHub));
+      const retryResults = await withConcurrencyLimit(retryTasks, concurrency);
+      retryResults.forEach((r, i) => {
+        const dept = emptyDepts[i].department;
+        const sources = r.status === 'fulfilled' ? r.value : [];
+        perDeptSources.set(dept, sources);
+        totalSourcesFound += sources.length;
+      });
+    }
+  }
+
   // Gap analysis
   const gapDepartments = identifyGaps(perDeptSources);
   if (gapDepartments.length > 0) {
