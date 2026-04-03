@@ -179,46 +179,79 @@ export async function gatherWebIntelligenceHybrid(
 ): Promise<{ result: WebIntelligenceResult; source: 'n8n' | 'direct' }> {
   if (isN8NConfigured()) {
     try {
-      // Trigger N8N full_research workflow (synchronous — waits for response)
+      // Call each N8N workflow directly in parallel (more reliable than orchestrator)
       const config = getN8NConfig();
-      const webhookUrl = `${config.baseUrl}/full_research`;
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+      const payload = JSON.stringify({ briefId, ideaPrompt, departments });
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), config.timeout);
+      const workflowTypes: N8NWorkflowType[] = [
+        'github_research',
+        'reddit_research',
+        'youtube_research',
+        'competitive_analysis',
+      ];
 
-      const resp = await fetch(webhookUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ briefId, ideaPrompt, departments }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
+      console.log(`[n8nBridge] Calling ${workflowTypes.length} N8N workflows in parallel for brief ${briefId}`);
 
-      if (resp.ok) {
-        const data = await resp.json();
-        const sources = processN8NResults({
-          briefId,
-          workflowType: 'full_research',
-          sources: data.sources ?? [],
-          metadata: data.metadata,
-        });
+      const results = await Promise.allSettled(
+        workflowTypes.map(async (wt) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), config.timeout);
+          try {
+            const resp = await fetch(`${config.baseUrl}/${wt}`, {
+              method: 'POST',
+              headers,
+              body: payload,
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            if (!resp.ok) return { sources: [] };
+            const data = await resp.json();
+            return { sources: data.sources ?? [], workflowType: wt };
+          } catch (err) {
+            clearTimeout(timer);
+            console.warn(`[n8nBridge] ${wt} failed:`, err instanceof Error ? err.message : err);
+            return { sources: [] };
+          }
+        })
+      );
 
-        if (sources.length > 0) {
-          console.log(`[n8nBridge] Got ${sources.length} sources from N8N for brief ${briefId}`);
-          const synthesizedContext = sources
-            .slice(0, 10)
-            .map((s) => `[${s.sourceType}] ${s.title} (trust: ${s.trustScore})`)
-            .join('\n');
-
-          return {
-            result: { sources, synthesizedContext },
-            source: 'n8n',
-          };
+      // Merge all sources from all workflows
+      const allSources: WebSource[] = [];
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value.sources?.length > 0) {
+          const processed = processN8NResults({
+            briefId,
+            workflowType: (r.value as any).workflowType ?? 'full_research',
+            sources: r.value.sources,
+          });
+          allSources.push(...processed);
         }
       }
-      console.warn('[n8nBridge] N8N returned no usable sources, falling back to direct');
+
+      if (allSources.length > 0) {
+        // Deduplicate by URL
+        const seen = new Set<string>();
+        const unique = allSources.filter(s => {
+          if (!s.url || seen.has(s.url)) return false;
+          seen.add(s.url);
+          return true;
+        }).sort((a, b) => (b.trustScore ?? 0) - (a.trustScore ?? 0));
+
+        console.log(`[n8nBridge] Got ${unique.length} unique sources from N8N for brief ${briefId}`);
+        const synthesizedContext = unique
+          .slice(0, 10)
+          .map((s) => `[${s.sourceType}] ${s.title} (trust: ${s.trustScore})`)
+          .join('\n');
+
+        return {
+          result: { sources: unique, synthesizedContext },
+          source: 'n8n',
+        };
+      }
+
+      console.warn('[n8nBridge] N8N returned no usable sources from any workflow, falling back to direct');
     } catch (err) {
       console.warn('[n8nBridge] N8N unavailable, falling back to direct:', err instanceof Error ? err.message : err);
     }

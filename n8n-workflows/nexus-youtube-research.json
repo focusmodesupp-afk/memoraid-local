@@ -28,9 +28,26 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=3&order=relevance&q={{ encodeURIComponent($json.query) }}&key={{ $env.YOUTUBE_API_KEY }}",
+        "url": "=https://www.youtube.com/results?search_query={{ encodeURIComponent($json.query) }}&sp=CAMSAhAB",
         "options": {
-          "timeout": 10000
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
         }
       },
       "id": "youtube-search",
@@ -45,7 +62,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Process YouTube search results\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const items = item.json?.items;\n  if (!items) continue;\n  \n  for (const video of items) {\n    const snippet = video.snippet;\n    if (!snippet) continue;\n    \n    const videoId = video.id?.videoId;\n    if (!videoId) continue;\n    \n    // YouTube trust score: 55-70 (moderate, as video content is less precise than code)\n    const trustScore = 60;\n    \n    allSources.push({\n      sourceType: 'youtube',\n      url: `https://www.youtube.com/watch?v=${videoId}`,\n      title: snippet.title?.slice(0, 500) || 'Untitled Video',\n      snippet: snippet.description?.slice(0, 300) || '',\n      trustScore,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'youtube_research',\n        channelTitle: snippet.channelTitle,\n        publishedAt: snippet.publishedAt,\n        videoId\n      }\n    });\n  }\n}\n\n// Deduplicate by videoId\nconst seen = new Set();\nconst unique = allSources.filter(s => {\n  const vid = s.rawPayload?.videoId;\n  if (seen.has(vid)) return false;\n  seen.add(vid);\n  return true;\n}).slice(0, 5);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    workflowName: 'nexus-youtube-research',\n    totalVideos: unique.length\n  }\n}}];"
+        "jsCode": "// Process YouTube search results (HTML scraping — no API key needed)\nconst allSources = [];\n\nfor (const item of $input.all()) {\n  const body = typeof item.json === 'string' ? item.json : (item.json?.body || item.json?.data || JSON.stringify(item.json));\n  const html = typeof body === 'string' ? body : '';\n  \n  // Extract video IDs from YouTube HTML\n  const videoIdMatches = html.match(/\"videoId\":\"([a-zA-Z0-9_-]{11})\"/g) || [];\n  const titleMatches = html.match(/\"title\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"/g) || [];\n  \n  const videoIds = [...new Set(videoIdMatches.map(m => m.match(/\"([a-zA-Z0-9_-]{11})\"/)?.[1]).filter(Boolean))];\n  \n  for (let i = 0; i < Math.min(videoIds.length, 5); i++) {\n    const videoId = videoIds[i];\n    let title = `YouTube Video ${i + 1}`;\n    if (titleMatches[i]) {\n      const m = titleMatches[i].match(/\"text\":\"([^\"]+)\"/);\n      if (m) title = m[1];\n    }\n    \n    allSources.push({\n      sourceType: 'youtube',\n      url: `https://www.youtube.com/watch?v=${videoId}`,\n      title: title.slice(0, 500),\n      snippet: `YouTube video about: ${title}`.slice(0, 300),\n      trustScore: 55,\n      rawPayload: {\n        source: 'n8n',\n        workflowType: 'youtube_research',\n        videoId\n      }\n    });\n  }\n}\n\n// Deduplicate\nconst seen = new Set();\nconst unique = allSources.filter(s => {\n  if (seen.has(s.url)) return false;\n  seen.add(s.url);\n  return true;\n}).slice(0, 5);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: {\n    workflowName: 'nexus-youtube-research',\n    totalVideos: unique.length\n  }\n}}];"
       },
       "id": "process-results",
       "name": "Process Results",
