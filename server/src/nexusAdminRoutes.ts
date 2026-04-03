@@ -247,7 +247,7 @@ nexusAdminRoutes.get('/nexus/briefs/:id', requireAdmin, async (req, res) => {
 nexusAdminRoutes.patch('/nexus/briefs/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, reviewNotes, assembledBrief, selectedDepartments, selectedModels, codebaseDepth, codebaseScope, contextNotes, targetPlatforms } = req.body as Record<string, unknown>;
+    const { title, reviewNotes, assembledBrief, selectedDepartments, selectedModels, codebaseDepth, codebaseScope, contextNotes, targetPlatforms, researchMode } = req.body as Record<string, unknown>;
 
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (title !== undefined) updates.title = title;
@@ -259,6 +259,7 @@ nexusAdminRoutes.patch('/nexus/briefs/:id', requireAdmin, async (req, res) => {
     if (codebaseScope !== undefined) updates.codebaseScope = codebaseScope;
     if (contextNotes !== undefined) updates.contextNotes = contextNotes || null;
     if (targetPlatforms !== undefined) updates.targetPlatforms = targetPlatforms;
+    if (researchMode !== undefined) updates.researchMode = researchMode;
 
     const [updated] = await db
       .update(nexusBriefs)
@@ -599,8 +600,32 @@ nexusAdminRoutes.get('/nexus/briefs/:id/sources', requireAdmin, async (req, res)
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// NEXUS V2: Meeting Round Endpoints
+// NEXUS V2: Meeting Mode Endpoints
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── POST /nexus/briefs/:id/start-meeting — Initialize meeting mode ──────────
+nexusAdminRoutes.post('/nexus/briefs/:id/start-meeting', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [brief] = await db.select().from(nexusBriefs).where(eq(nexusBriefs.id, id));
+    if (!brief) return res.status(404).json({ error: 'Brief not found' });
+
+    await db.update(nexusBriefs).set({
+      status: 'researching',
+      researchMode: 'meeting',
+      currentRound: 0,
+      researchStartedAt: new Date(),
+      updatedAt: new Date(),
+    } as any).where(eq(nexusBriefs.id, id));
+
+    res.json({ ok: true, briefId: id, mode: 'meeting' });
+  } catch (err) {
+    console.error('[nexus] start-meeting error:', err);
+    res.status(500).json({ error: 'Failed to start meeting mode' });
+  }
+});
+
+// ── Meeting Round Endpoints ─────────────────────────────────────────────────
 
 // ── POST /nexus/briefs/:id/run-round — Start a meeting round (SSE) ──────────
 nexusAdminRoutes.post('/nexus/briefs/:id/run-round', nexusRunLimiter, requireAdmin, async (req, res) => {

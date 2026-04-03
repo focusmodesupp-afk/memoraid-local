@@ -699,9 +699,9 @@ export default function AdminNexusBrief() {
       });
 
       if (researchMode === 'meeting') {
-        // Meeting mode: don't run the full pipeline — admin will trigger rounds manually
-        setBrief((b) => b ? { ...b, status: 'researching', researchMode: 'meeting' } as any : b);
-        setViewMode('auto');
+        // Meeting mode: just mark as researching and reload — admin triggers rounds manually
+        await apiFetch(`/admin/nexus/briefs/${briefId}/start-meeting`, { method: 'POST' });
+        await loadBrief();
       } else {
         await apiFetch(`/admin/nexus/briefs/${briefId}/run`, { method: 'POST', body: JSON.stringify({}) });
         connectStream();
