@@ -281,6 +281,8 @@ export default function AdminNexusBrief() {
   const [deptResearchGaps, setDeptResearchGaps] = useState<string[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [retryDept, setRetryDept] = useState<string | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({ github: true, reddit: true, articles: true });
+  const [showQA, setShowQA] = useState(false);
   const [retryModel, setRetryModel] = useState('claude-sonnet-4-6');
   const [retryLoading, setRetryLoading] = useState(false);
   const esRef = useRef<EventSource | null>(null);
@@ -2246,10 +2248,12 @@ export default function AdminNexusBrief() {
                 {/* GitHub Repos */}
                 {github.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <span>🐙</span> GitHub Repos
-                    </h4>
-                    <div className="space-y-2">
+                    <button onClick={() => setCollapsedSections(s => ({ ...s, github: !s.github }))}
+                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
+                      <span>🐙</span> GitHub Repos ({github.length})
+                      {collapsedSections.github ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                    </button>
+                    <div className={`space-y-2 ${collapsedSections.github ? 'hidden' : ''}`}>
                       {github.map((s) => (
                         <div key={s.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 hover:border-slate-600 transition-colors">
                           <div className="flex-1 min-w-0">
@@ -2289,10 +2293,12 @@ export default function AdminNexusBrief() {
                 {/* Reddit Threads */}
                 {reddit.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <span>🤖</span> Reddit — {tt('דיונים קהילתיים')}
-                    </h4>
-                    <div className="space-y-2">
+                    <button onClick={() => setCollapsedSections(s => ({ ...s, reddit: !s.reddit }))}
+                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
+                      <span>🤖</span> Reddit — {tt('דיונים קהילתיים')} ({reddit.length})
+                      {collapsedSections.reddit ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                    </button>
+                    <div className={`space-y-2 ${collapsedSections.reddit ? 'hidden' : ''}`}>
                       {reddit.map((s) => (
                         <div key={s.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 hover:border-slate-600 transition-colors">
                           <div className="flex-1 min-w-0">
@@ -2325,10 +2331,12 @@ export default function AdminNexusBrief() {
                 {/* Articles & Blogs */}
                 {articles.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <button onClick={() => setCollapsedSections(s => ({ ...s, articles: !s.articles }))}
+                      className="w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5 hover:text-slate-200 transition-colors">
                       <Rss className="w-3.5 h-3.5" /> {tt('מאמרים, בלוגים ו-YouTube')} ({articles.length})
-                    </h4>
-                    <div className="space-y-2">
+                      {collapsedSections.articles ? <ChevronDown className="w-3 h-3 mr-auto" /> : <ChevronUp className="w-3 h-3 mr-auto" />}
+                    </button>
+                    <div className={`space-y-2 ${collapsedSections.articles ? 'hidden' : ''}`}>
                       {articles.map((s) => {
                         const cat = String((s.rawPayload as any)?.category ?? 'tech');
                         const catIcon = RSS_CATEGORY_ICONS[cat] ?? '📄';
@@ -2385,6 +2393,77 @@ export default function AdminNexusBrief() {
               </div>
             );
           })()}
+
+          {/* ── Questions & Answers ────────────────────────────────────────── */}
+          {questions.length > 0 && (
+            <div className="admin-card">
+              <button
+                onClick={() => setShowQA(!showQA)}
+                className="w-full flex items-center gap-2"
+              >
+                <MessageSquare className="w-5 h-5 text-purple-400" />
+                <span className="text-base font-semibold text-slate-100">{tt('שאלות ותשובות מהמחקר')} ({questions.length})</span>
+                <span className="mr-auto text-xs text-slate-400">
+                  {questions.filter(q => q.answer).length} {tt('נענו')} | {questions.filter(q => q.verified).length} {tt('מאומתות')}
+                </span>
+                {showQA ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </button>
+
+              {showQA && (
+                <div className="mt-4 space-y-4">
+                  {(() => {
+                    const byDept: Record<string, typeof questions> = {};
+                    questions.forEach(q => { (byDept[q.department] ??= []).push(q); });
+                    return Object.entries(byDept).map(([dept, qs]) => {
+                      const deptInfo = ALL_DEPARTMENTS.find(d => d.id === dept);
+                      return (
+                        <div key={dept}>
+                          <h4 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                            <span>{deptInfo?.emoji ?? '📌'}</span>
+                            {deptInfo?.hebrewName ?? dept}
+                            <span className="text-xs text-slate-500">({qs.length} שאלות)</span>
+                          </h4>
+                          <div className="space-y-2">
+                            {qs.map(q => (
+                              <div key={q.id} className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/50">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs text-purple-400 mt-0.5 shrink-0">ש:</span>
+                                  <p className="text-sm text-slate-200 flex-1">{q.question}</p>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {q.verified && <CheckCircle className="w-3.5 h-3.5 text-green-400" />}
+                                    {q.confidence > 0 && (
+                                      <span className={`text-xs font-mono ${q.confidence >= 70 ? 'text-green-400' : q.confidence >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                        {q.confidence}%
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {q.answer ? (
+                                  <div className="flex items-start gap-2 mt-2">
+                                    <span className="text-xs text-emerald-400 mt-0.5 shrink-0">ת:</span>
+                                    <p className="text-xs text-slate-400 flex-1">{q.answer.slice(0, 300)}{q.answer.length > 300 ? '...' : ''}</p>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-amber-400 mt-2 flex items-center gap-1">
+                                    <AlertCircle className="w-3 h-3" /> טרם נענתה
+                                  </p>
+                                )}
+                                {q.answer_source && (
+                                  <span className="text-[10px] text-slate-500 mt-1 inline-block">
+                                    מקור: {q.answer_source === 'codebase_scan' ? '🔍 סריקת קוד' : q.answer_source === 'ai_research' ? '🤖 AI' : q.answer_source === 'perplexity' ? '🌐 Perplexity' : '✍️ ידני'}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Document Generation ───────────────────────────────────────── */}
           <div className="admin-card">
