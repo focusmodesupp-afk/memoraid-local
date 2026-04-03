@@ -152,14 +152,11 @@ export function buildDeptSearchQueries(
   // Pick top 2-3 most distinctive keywords to append
   const extraKeywords = config.searchKeywords.slice(0, 2).join(' ');
 
-  // Build GitHub query with qualifiers
-  const githubParts = [ideaPrompt, ...config.githubQualifiers];
-  // Add top team skill if unique and relevant
-  const uniqueSkill = teamSkills.find(
-    (s) => !ideaPrompt.toLowerCase().includes(s.toLowerCase()),
-  );
-  if (uniqueSkill) githubParts.push(uniqueSkill);
-  const githubQuery = githubParts.join(' ');
+  // GitHub search returns 0 when combining idea + dept keyword — they're too unrelated.
+  // Strategy: run the idea query as-is (max 5 words, no stop words). The dept differentiation
+  // comes from Reddit (dept-specific subreddits) and Perplexity (dept-focused prompt).
+  const STOP_WORDS = new Set(['for', 'the', 'a', 'an', 'in', 'on', 'of', 'to', 'and', 'or', 'with', 'is', 'at', 'by']);
+  const githubQuery = ideaPrompt.split(/\s+/).filter(w => !STOP_WORDS.has(w.toLowerCase())).slice(0, 5).join(' ');
 
   // Build Reddit query — shorter, more conversational
   const redditQuery = `${ideaPrompt} ${extraKeywords}`.trim();
