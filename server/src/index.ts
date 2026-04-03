@@ -828,6 +828,57 @@ const startServer = (port: number) => {
     // Patch 0042: add department column to nexus_brief_web_sources (per-agent deep research)
     await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS department VARCHAR(32)`);
 
+    // Patch 0043: NEXUS V2 — Meeting rounds tables + columns
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nexus_brief_rounds (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        brief_id UUID NOT NULL REFERENCES nexus_briefs(id) ON DELETE CASCADE,
+        round_number INTEGER NOT NULL,
+        round_type VARCHAR(32) NOT NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        synthesis_output TEXT,
+        synthesis_model VARCHAR(64),
+        synthesis_tokens INTEGER DEFAULT 0,
+        synthesis_cost_usd VARCHAR(16) DEFAULT '0',
+        participant_count INTEGER DEFAULT 0,
+        completed_count INTEGER DEFAULT 0,
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nexus_brief_round_results (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        brief_id UUID NOT NULL REFERENCES nexus_briefs(id) ON DELETE CASCADE,
+        round_id UUID NOT NULL REFERENCES nexus_brief_rounds(id) ON DELETE CASCADE,
+        team_member_id UUID,
+        department VARCHAR(32) NOT NULL,
+        employee_name VARCHAR(128),
+        employee_role VARCHAR(128),
+        employee_level VARCHAR(16),
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        output TEXT,
+        output_json JSONB,
+        prompt_snapshot TEXT,
+        model_used VARCHAR(64),
+        tokens_used INTEGER DEFAULT 0,
+        cost_usd VARCHAR(16) DEFAULT '0',
+        error_message TEXT,
+        web_sources_used INTEGER DEFAULT 0,
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `);
+    await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS research_mode VARCHAR(16) DEFAULT 'quick'`);
+    await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS current_round INTEGER DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS round_1_synthesis TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS round_2_synthesis TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_briefs ADD COLUMN IF NOT EXISTS round_3_synthesis TEXT`);
+    await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS team_member_id UUID`);
+    await db.execute(sql`ALTER TABLE nexus_brief_web_sources ADD COLUMN IF NOT EXISTS round_number INTEGER`);
+
     console.log('DB: schema patches applied');
   } catch (err: any) {
     console.error('DB startup check FAILED:', err?.code || '', err?.message || err);

@@ -1483,6 +1483,11 @@ export const nexusBriefs = pgTable('nexus_briefs', {
   generatedSprintId: uuid('generated_sprint_id'),
   phaseId: uuid('phase_id'),
   templateId: uuid('template_id'),
+  researchMode: varchar('research_mode', { length: 16 }).default('quick'),
+  currentRound: integer('current_round').default(0),
+  round1Synthesis: text('round_1_synthesis'),
+  round2Synthesis: text('round_2_synthesis'),
+  round3Synthesis: text('round_3_synthesis'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -1520,6 +1525,58 @@ export const nexusBriefWebSources = pgTable('nexus_brief_web_sources', {
   contributorCount: integer('contributor_count'),
   rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
   department: varchar('department', { length: 32 }),
+  teamMemberId: uuid('team_member_id'),
+  roundNumber: integer('round_number'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Nexus V2: Meeting Rounds — Multi-round research with per-employee agents
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const nexusBriefRounds = pgTable('nexus_brief_rounds', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id')
+    .notNull()
+    .references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  roundNumber: integer('round_number').notNull(),
+  roundType: varchar('round_type', { length: 32 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('pending'),
+  synthesisOutput: text('synthesis_output'),
+  synthesisModel: varchar('synthesis_model', { length: 64 }),
+  synthesisTokens: integer('synthesis_tokens').default(0),
+  synthesisCostUsd: varchar('synthesis_cost_usd', { length: 16 }).default('0'),
+  participantCount: integer('participant_count').default(0),
+  completedCount: integer('completed_count').default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const nexusBriefRoundResults = pgTable('nexus_brief_round_results', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id')
+    .notNull()
+    .references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  roundId: uuid('round_id')
+    .notNull()
+    .references(() => nexusBriefRounds.id, { onDelete: 'cascade' }),
+  teamMemberId: uuid('team_member_id'),
+  department: varchar('department', { length: 32 }).notNull(),
+  employeeName: varchar('employee_name', { length: 128 }),
+  employeeRole: varchar('employee_role', { length: 128 }),
+  employeeLevel: varchar('employee_level', { length: 16 }),
+  status: varchar('status', { length: 16 }).notNull().default('pending'),
+  output: text('output'),
+  outputJson: jsonb('output_json').$type<Record<string, unknown>>(),
+  promptSnapshot: text('prompt_snapshot'),
+  modelUsed: varchar('model_used', { length: 64 }),
+  tokensUsed: integer('tokens_used').default(0),
+  costUsd: varchar('cost_usd', { length: 16 }).default('0'),
+  errorMessage: text('error_message'),
+  webSourcesUsed: integer('web_sources_used').default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
