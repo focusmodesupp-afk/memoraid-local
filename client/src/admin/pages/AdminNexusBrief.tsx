@@ -39,6 +39,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
+import AdminNexusMeetingMode from './AdminNexusMeetingMode';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadAsPdf, downloadAsWord, downloadAllDocsAsZip } from '../utils/documentDownload';
 import { useAdminI18n } from '../hooks/useAdminI18n';
@@ -257,6 +258,7 @@ export default function AdminNexusBrief() {
 
   // ── Wizard state ──────────────────────────────────────────────────────────
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
+  const [researchMode, setResearchMode] = useState<'quick' | 'meeting'>('quick');
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [codebaseDepth, setCodebaseDepth] = useState<'quick' | 'deep' | 'full'>('deep');
   const [codebaseScope, setCodebaseScope] = useState<'all' | 'client' | 'server'>('all');
@@ -693,12 +695,18 @@ export default function AdminNexusBrief() {
       }
       await apiFetch(`/admin/nexus/briefs/${briefId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ selectedDepartments: selectedDepts, selectedModels, codebaseDepth, codebaseScope, contextNotes: mergedNotes || null, targetPlatforms }),
+        body: JSON.stringify({ selectedDepartments: selectedDepts, selectedModels, codebaseDepth, codebaseScope, contextNotes: mergedNotes || null, targetPlatforms, researchMode }),
       });
-      await apiFetch(`/admin/nexus/briefs/${briefId}/run`, { method: 'POST', body: JSON.stringify({}) });
-      connectStream();
-      // Optimistically set status
-      setBrief((b) => b ? { ...b, status: 'researching' } : b);
+
+      if (researchMode === 'meeting') {
+        // Meeting mode: don't run the full pipeline — admin will trigger rounds manually
+        setBrief((b) => b ? { ...b, status: 'researching', researchMode: 'meeting' } as any : b);
+        setViewMode('auto');
+      } else {
+        await apiFetch(`/admin/nexus/briefs/${briefId}/run`, { method: 'POST', body: JSON.stringify({}) });
+        connectStream();
+        setBrief((b) => b ? { ...b, status: 'researching' } : b);
+      }
     } catch (e) {
       alert(tt('שגיאה בהפעלת המחקר'));
     } finally {
@@ -1062,6 +1070,38 @@ export default function AdminNexusBrief() {
           ════════════════════════════════════════════════════════ */}
       {showWizard && (
         <div className="space-y-5">
+          {/* Step 0: Research Mode */}
+          <div className="admin-card">
+            <h2 className="text-base font-semibold text-slate-100 mb-3 flex items-center gap-2">
+              <Zap className="w-5 h-5 text-amber-400" />
+              {tt('מצב מחקר')}
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setResearchMode('quick')}
+                className={`p-4 rounded-xl border-2 text-right transition-all ${
+                  researchMode === 'quick'
+                    ? 'border-indigo-500 bg-indigo-500/10'
+                    : 'border-slate-600 bg-slate-800/50 hover:border-slate-500'
+                }`}
+              >
+                <p className="text-sm font-bold text-slate-100">{tt('מהיר')}</p>
+                <p className="text-xs text-slate-400 mt-1">{tt('כל המחלקות במקביל — Pipeline קיים')}</p>
+              </button>
+              <button
+                onClick={() => setResearchMode('meeting')}
+                className={`p-4 rounded-xl border-2 text-right transition-all ${
+                  researchMode === 'meeting'
+                    ? 'border-amber-500 bg-amber-500/10'
+                    : 'border-slate-600 bg-slate-800/50 hover:border-slate-500'
+                }`}
+              >
+                <p className="text-sm font-bold text-slate-100">{tt('ישיבות מחלקה')}</p>
+                <p className="text-xs text-slate-400 mt-1">{tt('3 סבבים: הנהלה → מנהלים → עובדים')}</p>
+              </button>
+            </div>
+          </div>
+
           {/* Step 1: Department selection */}
           <div className="admin-card">
             <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
@@ -1680,6 +1720,26 @@ export default function AdminNexusBrief() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════
+          MEETING MODE (V2)
+          ════════════════════════════════════════════════════════ */}
+      {(brief as any).researchMode === 'meeting' && brief.status !== 'draft' && (
+        <AdminNexusMeetingMode
+          briefId={briefId ?? ''}
+          brief={{
+            ideaPrompt: brief.ideaPrompt,
+            selectedDepartments: brief.selectedDepartments,
+            selectedModels: brief.selectedModels ?? [],
+            currentRound: (brief as any).currentRound,
+            round1Synthesis: (brief as any).round1Synthesis,
+            round2Synthesis: (brief as any).round2Synthesis,
+            round3Synthesis: (brief as any).round3Synthesis,
+          }}
+          tt={tt}
+          onReload={loadBrief}
+        />
       )}
 
       {/* ════════════════════════════════════════════════════════
