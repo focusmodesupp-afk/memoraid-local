@@ -399,24 +399,26 @@ async function callDeptResearchN8N(
 
 /**
  * Direct API fallback for per-department research (when N8N is not available).
+ * Accepts pre-fetched GitHub sources to avoid 13 identical API calls.
  */
 async function directDeptResearch(
   ideaPrompt: string,
   ctx: DeptResearchContext,
+  cachedGitHub?: WebSource[],
 ): Promise<WebSource[]> {
   try {
-    const { fetchGitHubSources, fetchRedditSources, fetchPerplexitySingle } = await import('./nexusWebIntelligence');
+    const { fetchRedditSources, fetchPerplexitySingle } = await import('./nexusWebIntelligence');
     const queries = buildDeptSearchQueries(ctx.department, ideaPrompt, ctx.skills, ctx.domainExpertise);
     const sourceConfig = DEPT_RESEARCH_SOURCES[ctx.department];
 
-    const tasks: Promise<WebSource[]>[] = [
-      // GitHub with dept-specific query
-      fetchGitHubSources(queries.githubQuery).then(sources =>
-        sources.map(s => ({ ...s, department: ctx.department }))
-      ),
-    ];
+    const tasks: Promise<WebSource[]>[] = [];
 
-    // Reddit — search top 2 dept subreddits
+    // GitHub — use cached results (tagged with this dept), skip API call
+    if (cachedGitHub && cachedGitHub.length > 0) {
+      tasks.push(Promise.resolve(cachedGitHub.map(s => ({ ...s, department: ctx.department }))));
+    }
+
+    // Reddit — search top 2 dept subreddits (these ARE different per dept)
     const subreddits = sourceConfig?.subreddits?.slice(0, 2) ?? [];
     for (const sub of subreddits) {
       tasks.push(
@@ -426,7 +428,7 @@ async function directDeptResearch(
       );
     }
 
-    // Perplexity — dept-focused query
+    // Perplexity — dept-focused query (unique per dept)
     tasks.push(
       fetchPerplexitySingle(ctx.department, queries.perplexityPrompt).then(source => {
         if (!source) return [];
@@ -480,10 +482,24 @@ export async function triggerPerDeptResearch(
 
   console.log(`[n8nBridge] Per-dept research: ${deptContexts.length} depts, concurrency=${concurrency}, mode=${useN8N ? 'n8n' : 'direct'}`);
 
+  // Pre-fetch GitHub once (all depts use the same idea-only query) to avoid 13 identical API calls
+  let sharedGitHub: WebSource[] | undefined;
+  if (!useN8N) {
+    try {
+      const { fetchGitHubSources } = await import('./nexusWebIntelligence');
+      const { buildDeptSearchQueries: buildQ } = await import('./nexusDeptResearchConfig');
+      const ghQuery = buildQ(deptContexts[0]?.department ?? 'cto', ideaPrompt, [], []).githubQuery;
+      sharedGitHub = await fetchGitHubSources(ghQuery);
+      console.log(`[n8nBridge] Shared GitHub fetch: ${sharedGitHub.length} repos for "${ghQuery}"`);
+    } catch {
+      sharedGitHub = [];
+    }
+  }
+
   const tasks = deptContexts.map((ctx) => () =>
     useN8N
       ? callDeptResearchN8N(briefId, ideaPrompt, ctx)
-      : directDeptResearch(ideaPrompt, ctx)
+      : directDeptResearch(ideaPrompt, ctx, sharedGitHub)
   );
 
   const results = await withConcurrencyLimit(tasks, concurrency);

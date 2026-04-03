@@ -158,6 +158,11 @@ type SSEEvent =
   | { type: 'department_start'; department: string; hebrewName: string }
   | { type: 'department_done'; department: string; tokensUsed: number; costUsd: number; outputPreview: string }
   | { type: 'department_error'; department: string; error: string }
+  | { type: 'dept_research_start'; departments: string[]; total: number }
+  | { type: 'dept_research_found'; department: string; sourceCount: number; topSource: string | null }
+  | { type: 'dept_research_gap'; gaps: string[]; count: number }
+  | { type: 'dept_research_done'; totalSources: number; gapsResolved: number; deptCount: number }
+  | { type: 'dept_research_error'; error: string }
   | { type: 'assembly_start' }
   | { type: 'assembly_done'; briefId: string; assembledLength: number }
   | { type: 'done'; totalCostUsd: number; totalTokens: number; durationMs: number }
@@ -269,6 +274,9 @@ export default function AdminNexusBrief() {
   const [totalDepts, setTotalDepts] = useState(0);
   const [webDone, setWebDone] = useState(false);
   const [assemblyDone, setAssemblyDone] = useState(false);
+  const [deptResearchDone, setDeptResearchDone] = useState(false);
+  const [deptResearchSources, setDeptResearchSources] = useState(0);
+  const [deptResearchGaps, setDeptResearchGaps] = useState<string[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
@@ -549,6 +557,9 @@ export default function AdminNexusBrief() {
     setLiveTokens(0);
     setLiveTopSources([]);
     setDeptLiveStatus({});
+    setDeptResearchDone(false);
+    setDeptResearchSources(0);
+    setDeptResearchGaps([]);
 
     const es = new EventSource(`/api/admin/nexus/briefs/${briefId}/stream`, { withCredentials: true });
     esRef.current = es;
@@ -562,7 +573,9 @@ export default function AdminNexusBrief() {
 
     const eventTypes: SSEEvent['type'][] = [
       'start', 'codebase_ready', 'web_intelligence_start', 'web_source_found',
-      'web_intelligence_done', 'department_start', 'department_done', 'department_error',
+      'web_intelligence_done', 'dept_research_start', 'dept_research_found',
+      'dept_research_gap', 'dept_research_done', 'dept_research_error',
+      'department_start', 'department_done', 'department_error',
       'assembly_start', 'assembly_done', 'done', 'error',
     ];
     for (const t of eventTypes) es.addEventListener(t, handle(t) as EventListenerOrEventListenerObject);
@@ -585,6 +598,16 @@ export default function AdminNexusBrief() {
       case 'web_intelligence_done':
         setWebDone(true);
         if (event.topSources.length > 0) setLiveTopSources(event.topSources);
+        break;
+      case 'dept_research_found':
+        setDeptResearchSources((n) => n + event.sourceCount);
+        break;
+      case 'dept_research_gap':
+        setDeptResearchGaps(event.gaps);
+        break;
+      case 'dept_research_done':
+        setDeptResearchDone(true);
+        setDeptResearchSources(event.totalSources);
         break;
       case 'department_start':
         setDeptLiveStatus((prev) => ({ ...prev, [event.department]: 'running' }));
@@ -885,8 +908,9 @@ export default function AdminNexusBrief() {
 
   // ── Progress calculation ──────────────────────────────────────────────────
   const progress = Math.min(100,
-    (completedDepts / Math.max(totalDepts, 1)) * 80 +
+    (completedDepts / Math.max(totalDepts, 1)) * 70 +
     (webDone ? 10 : 0) +
+    (deptResearchDone ? 10 : 0) +
     (assemblyDone ? 10 : 0)
   );
 
@@ -1550,6 +1574,28 @@ export default function AdminNexusBrief() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Per-department deep research */}
+          {webDone && (
+            <div className="admin-card">
+              <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2 mb-3">
+                <Zap className="w-5 h-5 text-amber-400" />
+                {tt('מחקר ממוקד למחלקות')}
+                {!deptResearchDone && <Loader2 className="w-4 h-4 animate-spin text-amber-400" />}
+                {deptResearchDone && <CheckCircle className="w-4 h-4 text-green-400" />}
+              </h3>
+              {deptResearchSources > 0 && (
+                <p className="text-sm text-slate-300 mb-2">
+                  {deptResearchSources} {tt('מקורות ממוקדים נמצאו')}
+                </p>
+              )}
+              {deptResearchGaps.length > 0 && (
+                <p className="text-xs text-amber-400">
+                  {tt('פערים ב-')} {deptResearchGaps.length} {tt('מחלקות — ריצה שנייה')}
+                </p>
               )}
             </div>
           )}
