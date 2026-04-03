@@ -1,0 +1,61 @@
+{
+  "name": "NEXUS — Employee Research",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "employee_research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "nexus-employee-research"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NEXUS Employee Research — per-employee web research for Meeting Mode\n// Receives employee context, searches GitHub + Reddit + Perplexity\n\nconst raw = $input.first().json;\nconst data = raw.body || raw;\nconst {\n  briefId = '', ideaPrompt = '', roundNumber = 1,\n  employeeName = '', employeeRole = '', department = '', level = '',\n  skills = [], domainExpertise = [],\n  subreddits = [], perplexityPrompt = ''\n} = data;\n\nconst allSources = [];\n\n// ── GitHub Search (idea-only, shared logic) ──\ntry {\n  const stopWords = new Set(['for','the','a','an','in','on','of','to','and','or','with','is','at','by']);\n  const ghQuery = ideaPrompt.split(/\\s+/).filter(w => !stopWords.has(w.toLowerCase())).slice(0, 5).join(' ');\n  const ghResp = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(ghQuery)}&sort=stars&per_page=5`, {\n    headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'NEXUS-Research-Bot/1.0' },\n    signal: AbortSignal.timeout(10000)\n  });\n  if (ghResp.ok) {\n    const ghData = await ghResp.json();\n    for (const repo of (ghData.items || []).slice(0, 5)) {\n      const stars = repo.stargazers_count || 0;\n      allSources.push({\n        sourceType: 'github', url: repo.html_url || '', title: repo.full_name || '',\n        snippet: (repo.description || '').slice(0, 300),\n        trustScore: Math.min(100, Math.round(Math.log10(stars + 1) * 20)),\n        githubStars: stars, department,\n        rawPayload: { source: 'n8n', workflowType: 'employee_research', employee: employeeName, round: roundNumber }\n      });\n    }\n  }\n} catch (e) { /* GitHub failed */ }\n\n// ── Reddit Search (employee-specific subreddits) ──\nfor (const sub of (subreddits || []).slice(0, 3)) {\n  try {\n    const redditQuery = `${ideaPrompt.slice(0, 60)} ${skills.slice(0, 2).join(' ')}`.trim();\n    const rResp = await fetch(`https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(redditQuery)}&restrict_sr=1&sort=relevance&limit=3&t=year`, {\n      headers: { 'User-Agent': 'NEXUS-Research-Bot/1.0' },\n      signal: AbortSignal.timeout(10000)\n    });\n    if (rResp.ok) {\n      const rData = await rResp.json();\n      for (const child of (rData?.data?.children || []).slice(0, 3)) {\n        const post = child.data;\n        if (!post || !post.title) continue;\n        const score = post.score || 0;\n        allSources.push({\n          sourceType: 'reddit', url: `https://reddit.com${post.permalink}`,\n          title: post.title.slice(0, 500), snippet: (post.selftext || '').slice(0, 300),\n          trustScore: Math.min(100, Math.max(0, Math.round(Math.log10(score + 1) * 15))),\n          redditScore: score, department,\n          rawPayload: { source: 'n8n', workflowType: 'employee_research', subreddit: post.subreddit, employee: employeeName, round: roundNumber }\n        });\n      }\n    }\n  } catch (e) { /* Reddit failed */ }\n}\n\n// ── Perplexity Search (employee-focused prompt) ──\ntry {\n  const pplxKey = $env.PERPLEXITY_API_KEY;\n  if (pplxKey && perplexityPrompt) {\n    const pResp = await fetch('https://api.perplexity.ai/chat/completions', {\n      method: 'POST',\n      headers: { 'Authorization': `Bearer ${pplxKey}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: perplexityPrompt }], max_tokens: 600 }),\n      signal: AbortSignal.timeout(15000)\n    });\n    if (pResp.ok) {\n      const pData = await pResp.json();\n      const content = pData?.choices?.[0]?.message?.content || '';\n      const citations = (pData?.citations || []).filter(u => typeof u === 'string' && u.startsWith('http'));\n      if (content) {\n        allSources.push({\n          sourceType: 'perplexity', url: citations[0] || 'https://www.perplexity.ai',\n          title: `[${employeeName}] Research — ${department}`, snippet: content.slice(0, 500),\n          trustScore: 75, department,\n          rawPayload: { source: 'n8n', workflowType: 'employee_research', citations, employee: employeeName, round: roundNumber }\n        });\n        for (const cite of citations.slice(0, 2)) {\n          try {\n            allSources.push({\n              sourceType: 'perplexity', url: cite, title: `[${employeeName}] ${new URL(cite).hostname}`,\n              snippet: '', trustScore: 60, department,\n              rawPayload: { source: 'n8n', workflowType: 'employee_research', citedBy: 'perplexity', employee: employeeName }\n            });\n          } catch { /* invalid URL */ }\n        }\n      }\n    }\n  }\n} catch (e) { /* Perplexity failed */ }\n\n// Deduplicate and sort\nconst seen = new Set();\nconst unique = allSources.sort((a, b) => b.trustScore - a.trustScore)\n  .filter(s => { if (!s.url || seen.has(s.url)) return false; seen.add(s.url); return true; })\n  .slice(0, 10);\n\nreturn [{ json: {\n  sources: unique,\n  metadata: { employeeName, employeeRole, department, level, roundNumber, workflowName: 'nexus-employee-research', totalFound: allSources.length, uniqueSources: unique.length }\n}}];"
+      },
+      "id": "research-and-score",
+      "name": "Employee Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to NEXUS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Employee Research", "type": "main", "index": 0 }]
+      ]
+    },
+    "Employee Research": {
+      "main": [
+        [{ "node": "Respond to NEXUS", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "NEXUS" },
+    { "name": "Research" },
+    { "name": "Employee" },
+    { "name": "V2" }
+  ]
+}

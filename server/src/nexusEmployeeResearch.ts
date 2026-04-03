@@ -90,14 +90,88 @@ function getEmployeeSubreddits(employee: EmployeeResearchContext): string[] {
 }
 
 /**
- * Fetch web sources for a specific employee.
+ * Fetch web sources via N8N employee_research webhook.
+ * Returns empty array if N8N is not configured or fails.
+ */
+async function fetchEmployeeWebSourcesN8N(
+  employee: EmployeeResearchContext,
+  ideaPrompt: string,
+  roundNumber: number,
+): Promise<WebSource[]> {
+  const baseUrl = process.env.N8N_WEBHOOK_BASE_URL?.replace(/\/$/, '');
+  if (!baseUrl) return [];
+
+  const queries = buildEmployeeSearchQueries(employee, ideaPrompt);
+  const subreddits = getEmployeeSubreddits(employee);
+
+  const timeout = Number(process.env.N8N_DEPT_TIMEOUT_MS) || 45000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const apiKey = process.env.N8N_API_KEY;
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const resp = await fetch(`${baseUrl}/employee_research`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        briefId: '',
+        ideaPrompt,
+        roundNumber,
+        employeeName: employee.employeeName,
+        employeeRole: employee.employeeRole,
+        department: employee.department,
+        level: employee.level,
+        skills: employee.skills,
+        domainExpertise: employee.domainExpertise,
+        subreddits,
+        perplexityPrompt: queries.perplexityPrompt,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const sources: WebSource[] = (data.sources ?? [])
+      .filter((s: any) => s && s.title && (s.url || s.snippet))
+      .map((s: any) => ({
+        sourceType: s.sourceType ?? 'perplexity',
+        url: s.url ?? '',
+        title: s.title ?? '',
+        snippet: s.snippet ?? '',
+        trustScore: Math.min(100, Math.max(0, s.trustScore ?? 50)),
+        githubStars: s.githubStars,
+        redditScore: s.redditScore,
+        department: employee.department,
+        rawPayload: s.rawPayload ?? { source: 'n8n', workflowType: 'employee_research' },
+      }));
+    return sources;
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
+/**
+ * Fetch web sources for a specific employee — hybrid (N8N first, direct fallback).
  * Uses shared GitHub results (same for all) + employee-specific Reddit + Perplexity.
  */
 export async function fetchEmployeeWebSources(
   employee: EmployeeResearchContext,
   ideaPrompt: string,
   sharedGitHubSources?: WebSource[],
+  roundNumber?: number,
 ): Promise<WebSource[]> {
+  // Try N8N first
+  if (process.env.N8N_WEBHOOK_BASE_URL) {
+    const n8nSources = await fetchEmployeeWebSourcesN8N(employee, ideaPrompt, roundNumber ?? 1);
+    if (n8nSources.length > 0) return n8nSources;
+    console.warn(`[EmployeeResearch] N8N returned 0 for ${employee.employeeName}, using direct fallback`);
+  }
+
   const queries = buildEmployeeSearchQueries(employee, ideaPrompt);
   const allSources: WebSource[] = [];
 

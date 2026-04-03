@@ -300,7 +300,7 @@ export async function runMeetingRound(opts: {
       domainExpertise: employee.domainExpertise ?? [],
       responsibilities: employee.responsibilities,
     };
-    const webSources = await fetchEmployeeWebSources(empContext, searchPrompt, sharedGitHub);
+    const webSources = await fetchEmployeeWebSources(empContext, searchPrompt, sharedGitHub, roundNumber);
 
     // Load department knowledge
     let deptKnowledge = '';
