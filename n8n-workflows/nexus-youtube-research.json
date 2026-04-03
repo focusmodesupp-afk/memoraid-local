@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const { ideaPrompt, briefId } = $input.first().json.body;\n\n// Build YouTube search queries\nconst queries = [\n  `${ideaPrompt.slice(0, 80)} tutorial`,\n  `${ideaPrompt.slice(0, 80)} implementation guide`,\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
+        "jsCode": "// Handle both direct webhook and sub-workflow calls\nconst raw = $input.first().json;\nconst data = raw.body || raw;\nconst { ideaPrompt = '', briefId = '' } = data;\n\n// Build YouTube search queries\nconst queries = [\n  `${ideaPrompt.slice(0, 80)} tutorial`,\n  `${ideaPrompt.slice(0, 80)} implementation guide`,\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
       },
       "id": "build-queries",
       "name": "Build Search Queries",

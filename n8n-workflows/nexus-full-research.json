@@ -31,7 +31,7 @@
         "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/github_research",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": { "timeout": 30000 }
       },
       "id": "call-github",
@@ -47,7 +47,7 @@
         "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/reddit_research",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": { "timeout": 30000 }
       },
       "id": "call-reddit",
@@ -63,7 +63,7 @@
         "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/youtube_research",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": { "timeout": 30000 }
       },
       "id": "call-youtube",
@@ -79,7 +79,7 @@
         "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'http://localhost:5678/webhook' }}/competitive_analysis",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ body: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": { "timeout": 30000 }
       },
       "id": "call-competitive",

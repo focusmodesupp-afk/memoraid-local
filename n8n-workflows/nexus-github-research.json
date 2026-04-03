@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract search query from NEXUS payload\nconst { ideaPrompt, briefId, departments } = $input.first().json.body;\n\n// Build focused search queries\nconst baseQuery = ideaPrompt.slice(0, 120);\nconst queries = [\n  baseQuery,\n  `${baseQuery} typescript react`,\n  `${baseQuery} nodejs express`\n];\n\nreturn [{ json: { briefId, ideaPrompt, queries, departments } }];"
+        "jsCode": "// Extract search query from NEXUS payload\n// Handle both direct webhook and sub-workflow calls\nconst raw = $input.first().json;\nconst data = raw.body || raw;\nconst ideaPrompt = data.ideaPrompt || '';\nconst briefId = data.briefId || '';\nconst departments = data.departments || [];\n\n// Build focused search queries\nconst baseQuery = ideaPrompt.slice(0, 120);\nconst queries = [\n  baseQuery,\n  `${baseQuery} typescript react`,\n  `${baseQuery} nodejs express`\n];\n\nreturn [{ json: { briefId, ideaPrompt, queries, departments } }];"
       },
       "id": "extract-query",
       "name": "Extract Search Query",

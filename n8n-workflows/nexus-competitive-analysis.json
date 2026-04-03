@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const { ideaPrompt, briefId } = $input.first().json.body;\n\n// Build competitive search queries\nconst baseIdea = ideaPrompt.slice(0, 100);\nconst queries = [\n  `${baseIdea} competitors alternatives`,\n  `${baseIdea} market analysis comparison`,\n  `best ${baseIdea} tools software 2025 2026`\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
+        "jsCode": "// Handle both direct webhook and sub-workflow calls\nconst raw = $input.first().json;\nconst data = raw.body || raw;\nconst { ideaPrompt = '', briefId = '' } = data;\n\n// Build competitive search queries\nconst baseIdea = ideaPrompt.slice(0, 100);\nconst queries = [\n  `${baseIdea} competitors alternatives`,\n  `${baseIdea} market analysis comparison`,\n  `best ${baseIdea} tools software 2025 2026`\n];\n\nreturn queries.map(q => ({ json: { query: q, briefId } }));"
       },
       "id": "build-queries",
       "name": "Build Search Queries",
