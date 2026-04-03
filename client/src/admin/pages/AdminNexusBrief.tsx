@@ -39,6 +39,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
+import { playCompletionSound, playErrorSound } from '../../lib/sounds';
 import AdminNexusMeetingMode from './AdminNexusMeetingMode';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadAsPdf, downloadAsWord, downloadAllDocsAsZip } from '../utils/documentDownload';
@@ -635,12 +636,14 @@ export default function AdminNexusBrief() {
       case 'done':
         setStreaming(false);
         esRef.current?.close();
+        playCompletionSound();
         void loadBrief();
         break;
       case 'error':
         setStreamError(event.message);
         setStreaming(false);
         esRef.current?.close();
+        playErrorSound();
         void loadBrief();
         break;
     }

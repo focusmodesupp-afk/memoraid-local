@@ -16,6 +16,7 @@ import {
   ChevronDown, ChevronUp, Users, Crown, Briefcase, Code2,
 } from 'lucide-react';
 import { apiFetch, apiFetchRaw } from '../../lib/api';
+import { playCompletionSound, playErrorSound } from '../../lib/sounds';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -235,10 +236,12 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
 
       case 'round_done':
         setRoundStatus(prev => ({ ...prev, [roundNumber]: 'completed' }));
+        playCompletionSound();
         break;
 
       case 'error':
         setRoundStatus(prev => ({ ...prev, [roundNumber]: 'error' }));
+        playErrorSound();
         break;
     }
   };
@@ -257,11 +260,14 @@ export default function AdminNexusMeetingMode({ briefId, brief, tt, onReload }: 
         method: 'POST',
       });
       if (data.ok) {
+        playCompletionSound();
         onReload();
       } else {
+        playErrorSound();
         alert(data.error || 'Synthesis failed');
       }
     } catch (err) {
+      playErrorSound();
       alert('Synthesis error: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSynthesizing(null);
