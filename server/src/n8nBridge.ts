@@ -480,7 +480,27 @@ export async function triggerPerDeptResearch(
   const concurrency = Number(process.env.N8N_DEPT_CONCURRENCY) || 5;
   const useN8N = isN8NConfigured();
 
-  console.log(`[n8nBridge] Per-dept research: ${deptContexts.length} depts, concurrency=${concurrency}, mode=${useN8N ? 'n8n' : 'direct'}`);
+  // Auto-translate Hebrew idea to English for GitHub/Reddit (they return 0 for Hebrew)
+  let searchIdeaPrompt = ideaPrompt;
+  const hasHebrew = /[\u0590-\u05FF]/.test(ideaPrompt);
+  if (hasHebrew) {
+    try {
+      const { callAI } = await import('./multiProviderAI');
+      const result = await callAI('general', [{
+        role: 'user',
+        content: `Translate this Hebrew text to a short English search query (3-4 words only, noun phrases, no articles, no quotes):\n"${ideaPrompt}"`,
+      }], { temperature: 0, maxTokens: 50, preferredModels: ['claude-haiku-4-5-20251001' as any] });
+      const translated = result.content?.trim().replace(/[*"'`]/g, '').trim();
+      if (translated && translated.length > 3 && translated.length < 200) {
+        searchIdeaPrompt = translated;
+        console.log(`[n8nBridge] Hebrew→English translation: "${ideaPrompt.slice(0, 40)}..." → "${searchIdeaPrompt}"`);
+      }
+    } catch (err) {
+      console.warn('[n8nBridge] Hebrew translation failed, using original:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  console.log(`[n8nBridge] Per-dept research: ${deptContexts.length} depts, concurrency=${concurrency}, mode=${useN8N ? 'n8n' : 'direct'}${hasHebrew ? ' (Hebrew translated)' : ''}`);
 
   // Pre-fetch GitHub once (all depts use the same idea-only query) to avoid 13 identical API calls
   let sharedGitHub: WebSource[] | undefined;
@@ -488,7 +508,7 @@ export async function triggerPerDeptResearch(
     try {
       const { fetchGitHubSources } = await import('./nexusWebIntelligence');
       const { buildDeptSearchQueries: buildQ } = await import('./nexusDeptResearchConfig');
-      const ghQuery = buildQ(deptContexts[0]?.department ?? 'cto', ideaPrompt, [], []).githubQuery;
+      const ghQuery = buildQ(deptContexts[0]?.department ?? 'cto', searchIdeaPrompt, [], []).githubQuery;
       sharedGitHub = await fetchGitHubSources(ghQuery);
       console.log(`[n8nBridge] Shared GitHub fetch: ${sharedGitHub.length} repos for "${ghQuery}"`);
     } catch {
@@ -496,10 +516,11 @@ export async function triggerPerDeptResearch(
     }
   }
 
+  // Use translated prompt for GitHub/Reddit search, original for N8N (which has its own query builder)
   const tasks = deptContexts.map((ctx) => () =>
     useN8N
-      ? callDeptResearchN8N(briefId, ideaPrompt, ctx)
-      : directDeptResearch(ideaPrompt, ctx, sharedGitHub)
+      ? callDeptResearchN8N(briefId, searchIdeaPrompt, ctx)
+      : directDeptResearch(searchIdeaPrompt, ctx, sharedGitHub)
   );
 
   const results = await withConcurrencyLimit(tasks, concurrency);
@@ -528,7 +549,7 @@ export async function triggerPerDeptResearch(
           sharedGitHub = await fetchGitHubSources(ghQuery);
         } catch { sharedGitHub = []; }
       }
-      const retryTasks = emptyDepts.map(ctx => () => directDeptResearch(ideaPrompt, ctx, sharedGitHub));
+      const retryTasks = emptyDepts.map(ctx => () => directDeptResearch(searchIdeaPrompt, ctx, sharedGitHub));
       const retryResults = await withConcurrencyLimit(retryTasks, concurrency);
       retryResults.forEach((r, i) => {
         const dept = emptyDepts[i].department;
