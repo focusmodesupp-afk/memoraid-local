@@ -24,6 +24,8 @@ import { nexusSettingsRoutes } from './nexusSettingsRoutes';
 import { gatherProjectData } from './projectDataGatherer';
 import { processN8NResults, isN8NConfigured, type N8NResultPayload } from './n8nBridge';
 import { generateQuestionsForBrief, autoAnswerQuestions, getAllBriefQuestions } from './questionDiscovery';
+import { runMeetingRound, synthesizeRound } from './nexusRoundOrchestrator';
+import { nexusBriefRounds, nexusBriefRoundResults } from '../../shared/schemas/schema';
 
 // ── File upload (in-memory, no disk) ──────────────────────────────────────────
 const upload = multer({
@@ -595,6 +597,223 @@ nexusAdminRoutes.get('/nexus/briefs/:id/sources', requireAdmin, async (req, res)
     res.status(500).json({ error: 'Failed to get sources' });
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEXUS V2: Meeting Round Endpoints
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── POST /nexus/briefs/:id/run-round — Start a meeting round (SSE) ──────────
+nexusAdminRoutes.post('/nexus/briefs/:id/run-round', nexusRunLimiter, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { roundNumber, models } = req.body as { roundNumber: number; models?: string[] };
+
+  if (!roundNumber || ![1, 2, 3].includes(roundNumber)) {
+    return res.status(400).json({ error: 'roundNumber must be 1, 2, or 3' });
+  }
+
+  const [brief] = await db.select().from(nexusBriefs).where(eq(nexusBriefs.id, id));
+  if (!brief) return res.status(404).json({ error: 'Brief not found' });
+
+  // Validate round order
+  if (roundNumber === 2 && !brief.round1Synthesis) {
+    return res.status(400).json({ error: 'Round 1 must be completed and synthesized before Round 2' });
+  }
+  if (roundNumber === 3 && !brief.round2Synthesis) {
+    return res.status(400).json({ error: 'Round 2 must be completed and synthesized before Round 3' });
+  }
+
+  const admin = await getAdminFromRequest(req);
+
+  // Setup SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  try {
+    const result = await runMeetingRound({
+      briefId: id,
+      roundNumber: roundNumber as 1 | 2 | 3,
+      models: models ?? brief.selectedModels ?? [],
+      adminUserId: admin?.id,
+      sseRes: res,
+    });
+
+    sseWrite(res, 'done', {
+      roundId: result.roundId,
+      participantCount: result.participantCount,
+      completedCount: result.completedCount,
+      totalCost: result.totalCost,
+      totalTokens: result.totalTokens,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    sseWrite(res, 'error', { message, retryable: true });
+  }
+
+  res.end();
+});
+
+// ── GET /nexus/briefs/:id/rounds — List all rounds for a brief ──────────────
+nexusAdminRoutes.get('/nexus/briefs/:id/rounds', requireAdmin, async (req, res) => {
+  try {
+    const rounds = await db.select().from(nexusBriefRounds)
+      .where(eq(nexusBriefRounds.briefId, req.params.id))
+      .orderBy(nexusBriefRounds.roundNumber);
+    res.json({ rounds });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get rounds' });
+  }
+});
+
+// ── GET /nexus/briefs/:id/rounds/:roundId — Round detail with results ───────
+nexusAdminRoutes.get('/nexus/briefs/:id/rounds/:roundId', requireAdmin, async (req, res) => {
+  try {
+    const [round] = await db.select().from(nexusBriefRounds)
+      .where(eq(nexusBriefRounds.id, req.params.roundId));
+    if (!round) return res.status(404).json({ error: 'Round not found' });
+
+    const results = await db.select().from(nexusBriefRoundResults)
+      .where(eq(nexusBriefRoundResults.roundId, req.params.roundId))
+      .orderBy(nexusBriefRoundResults.department);
+
+    res.json({ round, results });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get round details' });
+  }
+});
+
+// ── POST /nexus/briefs/:id/rounds/:roundId/synthesize — Merge round results ─
+nexusAdminRoutes.post('/nexus/briefs/:id/rounds/:roundId/synthesize', requireAdmin, async (req, res) => {
+  try {
+    const [round] = await db.select().from(nexusBriefRounds)
+      .where(eq(nexusBriefRounds.id, req.params.roundId));
+    if (!round) return res.status(404).json({ error: 'Round not found' });
+
+    const admin = await getAdminFromRequest(req);
+    const result = await synthesizeRound({
+      briefId: req.params.id,
+      roundId: req.params.roundId,
+      roundNumber: round.roundNumber as 1 | 2 | 3,
+      adminUserId: admin?.id,
+    });
+
+    res.json({
+      ok: true,
+      synthesis: result.synthesis.slice(0, 500) + '...',
+      model: result.model,
+      tokensUsed: result.tokensUsed,
+      costUsd: result.costUsd,
+    });
+  } catch (err) {
+    console.error('[nexus] synthesize error:', err);
+    res.status(500).json({ error: 'Failed to synthesize round' });
+  }
+});
+
+// ── POST /nexus/briefs/:id/rounds/:roundId/retry-employee — Retry one employee
+nexusAdminRoutes.post('/nexus/briefs/:id/rounds/:roundId/retry-employee', requireAdmin, async (req, res) => {
+  try {
+    const { employeeName, model } = req.body as { employeeName: string; model: string };
+    if (!employeeName || !model) return res.status(400).json({ error: 'employeeName and model required' });
+
+    // Find the failed result
+    const [failedResult] = await db.select().from(nexusBriefRoundResults)
+      .where(
+        sql`round_id = ${req.params.roundId} AND employee_name = ${employeeName} AND status = 'error'`
+      );
+    if (!failedResult) return res.status(404).json({ error: 'Failed employee result not found' });
+
+    const [round] = await db.select().from(nexusBriefRounds)
+      .where(eq(nexusBriefRounds.id, req.params.roundId));
+    if (!round) return res.status(404).json({ error: 'Round not found' });
+
+    const [brief] = await db.select().from(nexusBriefs)
+      .where(eq(nexusBriefs.id, req.params.id));
+    if (!brief) return res.status(404).json({ error: 'Brief not found' });
+
+    // Load the employee from team members
+    const { loadNexusConfig } = await import('./nexusDepartmentAgents');
+    const config = await loadNexusConfig();
+    const employee = config.teamMembers.find(m => m.name === employeeName && m.department === failedResult.department);
+    if (!employee) return res.status(404).json({ error: 'Employee not found in team' });
+
+    // Re-run the employee agent
+    const { buildPromptEnvelope } = await import('./nexusPromptEnvelope');
+    const { fetchEmployeeWebSources } = await import('./nexusEmployeeResearch');
+    const { gatherProjectData } = await import('./projectDataGatherer');
+    const { callAI } = await import('./multiProviderAI');
+
+    const codebaseContext = await gatherProjectData('quick', 'all');
+    const ROUND_CONFIG: Record<number, 'ERP' | 'TBP' | 'IPP'> = { 1: 'ERP', 2: 'TBP', 3: 'IPP' };
+    const protocol = ROUND_CONFIG[round.roundNumber] ?? 'ERP';
+
+    const webSources = await fetchEmployeeWebSources(
+      { employeeName, employeeRole: employee.roleHe, department: employee.department, level: employee.level, skills: employee.skills, domainExpertise: employee.domainExpertise ?? [] },
+      brief.ideaPrompt,
+    );
+
+    const envelope = buildPromptEnvelope({
+      briefId: req.params.id,
+      ideaPrompt: brief.ideaPrompt,
+      codebaseContext,
+      knownConstraints: ['Hebrew RTL first', 'Tailwind CSS only', 'shadcn/ui components'],
+      roundNumber: round.roundNumber as 1 | 2 | 3,
+      protocol,
+      previousSynthesis: round.roundNumber >= 2 ? brief.round1Synthesis : null,
+      employee: {
+        name: employee.name, roleHe: employee.roleHe, department: employee.department,
+        level: employee.level, bio: employee.bio, skills: employee.skills,
+        domainExpertise: employee.domainExpertise, methodology: employee.methodology,
+        personality: employee.personality, certifications: employee.certifications,
+        responsibilities: employee.responsibilities, education: employee.education,
+        experienceYears: employee.experienceYears, background: employee.background,
+      },
+      webSources,
+    });
+
+    const admin = await getAdminFromRequest(req);
+    const aiResult = await callAI('departmentAnalysis', [
+      { role: 'system', content: envelope.systemPrompt },
+      { role: 'user', content: envelope.userPrompt },
+    ], { preferredModels: [model as any], adminUserId: admin?.id, maxTokens: 3000 });
+
+    let outputJson: Record<string, unknown> | null = null;
+    try {
+      const m = aiResult.content.match(/\{[\s\S]*\}/);
+      if (m) outputJson = JSON.parse(m[0]);
+    } catch { /* not JSON */ }
+
+    // Update the result
+    await db.update(nexusBriefRoundResults).set({
+      status: aiResult.content ? 'completed' : 'error',
+      output: aiResult.content,
+      outputJson,
+      modelUsed: aiResult.model,
+      tokensUsed: aiResult.tokensIn + aiResult.tokensOut,
+      costUsd: String(aiResult.costUsd.toFixed(6)),
+      errorMessage: null,
+      completedAt: new Date(),
+    }).where(eq(nexusBriefRoundResults.id, failedResult.id));
+
+    res.json({
+      ok: true,
+      employee: employeeName,
+      model: aiResult.model,
+      tokensUsed: aiResult.tokensIn + aiResult.tokensOut,
+      costUsd: aiResult.costUsd,
+    });
+  } catch (err) {
+    console.error('[nexus] retry-employee error:', err);
+    res.status(500).json({ error: 'Failed to retry employee' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEXUS V1: Task Extraction & Sprint Generation
+// ══════════════════════════════════════════════════════════════════════════════
 
 // ── POST /nexus/briefs/:id/extract-tasks ──────────────────────────────────────
 nexusAdminRoutes.post('/nexus/briefs/:id/extract-tasks', requireAdmin, nexusExtractLimiter, async (req, res) => {
