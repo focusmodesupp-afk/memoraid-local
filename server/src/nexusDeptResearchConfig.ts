@@ -126,6 +126,11 @@ export const DEPT_RESEARCH_SOURCES: Record<string, DeptSourceConfig> = {
 
 // ai-dev is excluded from per-dept research — it runs after all depts
 
+// MemorAid project context — appended to every Perplexity prompt for relevance
+const MEMORAID_CONTEXT = `
+Context: MemorAid is a Hebrew-first SaaS platform ($15/user/month) for digital health management in elderly care — specifically for families managing dementia and Alzheimer's patients. Tech stack: React 18 + TypeScript + Node.js + Express + PostgreSQL + Drizzle ORM.
+Focus on healthcare SaaS, elderly care technology, and Israeli market where relevant. Exclude results not related to healthcare/elderly care unless directly applicable.`;
+
 /**
  * Build department-focused search queries by combining ideaPrompt with
  * department-specific keywords and team member skills/expertise.
@@ -171,6 +176,7 @@ export function buildDeptSearchQueries(
   const perplexityPrompt = config.perplexityFocusTemplate.replace('{idea}', ideaPrompt)
     + skillContext
     + domainContext
+    + MEMORAID_CONTEXT
     + '\nBe concise (max 400 words). Include URLs where possible.';
 
   return { githubQuery, redditQuery, perplexityPrompt };

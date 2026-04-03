@@ -441,7 +441,8 @@ async function directDeptResearch(
     for (const r of results) {
       if (r.status === 'fulfilled') sources.push(...r.value);
     }
-    return sources;
+    // Quality gate: remove low-trust sources
+    return sources.filter(s => s.trustScore >= 15);
   } catch (err) {
     console.warn(`[n8nBridge] directDeptResearch for ${ctx.department} failed:`, err instanceof Error ? err.message : err);
     return [];
@@ -558,6 +559,21 @@ export async function triggerPerDeptResearch(
         totalSourcesFound += sources.length;
       });
     }
+  }
+
+  // Cross-department deduplication — remove same URL appearing in multiple depts
+  const globalSeen = new Set<string>();
+  for (const [dept, sources] of perDeptSources) {
+    const deduped = sources.filter(s => {
+      if (!s.url || globalSeen.has(s.url)) return false;
+      globalSeen.add(s.url);
+      return true;
+    });
+    if (deduped.length < sources.length) {
+      console.log(`[n8nBridge] Dedup ${dept}: ${sources.length} → ${deduped.length}`);
+    }
+    perDeptSources.set(dept, deduped);
+    totalSourcesFound -= (sources.length - deduped.length);
   }
 
   // Gap analysis

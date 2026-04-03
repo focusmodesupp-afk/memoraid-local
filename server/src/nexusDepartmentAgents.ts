@@ -538,14 +538,26 @@ function buildAgentPrompt(opts: {
   const generalSources = webIntelligence.sources.filter((s) => !s.department || s.department !== department);
   const topSources = [...deptSources, ...generalSources].slice(0, 10);
 
-  const sourcesTable =
-    topSources.length > 0
+  // Filter out very low trust sources before presenting to agent
+  const qualitySources = topSources.filter(s => s.trustScore >= 20);
+  const highTrust = qualitySources.filter(s => s.trustScore >= 50).length;
+  const lowTrust = qualitySources.filter(s => s.trustScore < 30).length;
+
+  let sourcesTable =
+    qualitySources.length > 0
       ? [
           '| סוג | כותרת | Trust | מחלקה |',
           '|---|---|---|---|',
-          ...topSources.map((s) => `| ${s.sourceType} | [${s.title.slice(0, 55)}](${s.url}) | ${s.trustScore}/100 | ${s.department ?? 'כללי'} |`),
+          ...qualitySources.map((s) => {
+            const tier = s.trustScore >= 70 ? '🟢' : s.trustScore >= 40 ? '🟡' : '🔴';
+            return `| ${tier} ${s.sourceType} | [${s.title.slice(0, 55)}](${s.url}) | ${s.trustScore}/100 | ${s.department ?? 'כללי'} |`;
+          }),
         ].join('\n')
       : 'לא נמצאו מקורות.';
+
+  if (lowTrust > highTrust && qualitySources.length > 0) {
+    sourcesTable += '\n\n> ⚠️ **שים לב:** רוב המקורות הם ברמת אמינות נמוכה. השתמש בשיקול דעת מקצועי ואל תסתמך על מקורות חלשים.';
+  }
 
   // ── Skills block ──
   const skillsBlock = nexusConfig?.skills?.length
@@ -607,6 +619,16 @@ ${webIntelligence.synthesizedContext}
 
 ## מקורות מידע (ממוקדים למחלקת ${config.hebrewName})
 ${sourcesTable}
+
+---
+
+## כללי ציטוט מקורות (חובה!)
+- כל טענה עובדתית חייבת לציין מקור: [שם המקור](URL) או "שיקול מקצועי"
+- אל תשתמש במקורות עם Trust Score מתחת ל-40 אלא אם אין חלופה טובה יותר
+- אם מקור לא רלוונטי ל-MemorAid / בריאות דיגיטלית / טיפול בקשישים — התעלם ממנו
+- ציין סעיף "Known Unknowns" — מה לא הצלחת למצוא מידע עליו
+- העדף מקורות עם Trust Score גבוה (70+) על פני נמוך
+- אל תמציא מידע — אם אין מקור, כתוב "שיקול מקצועי"
 
 ---
 

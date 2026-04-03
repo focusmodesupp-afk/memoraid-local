@@ -289,9 +289,13 @@ ${forbidden.map(f => `- ${f}`).join('\n')}`;
     lines.push(`## מקורות מידע מהרשת (${opts.webSources.length} מקורות)`);
     lines.push('| סוג | כותרת | Trust |');
     lines.push('|---|---|---|');
-    opts.webSources.slice(0, 10).forEach(s => {
-      lines.push(`| ${s.sourceType} | [${s.title.slice(0, 60)}](${s.url}) | ${s.trustScore}/100 |`);
+    const qualitySources = opts.webSources.filter(s => s.trustScore >= 20).slice(0, 10);
+    qualitySources.forEach(s => {
+      const tier = s.trustScore >= 70 ? '🟢' : s.trustScore >= 40 ? '🟡' : '🔴';
+      lines.push(`| ${tier} ${s.sourceType} | [${s.title.slice(0, 60)}](${s.url}) | ${s.trustScore}/100 |`);
     });
+    lines.push('');
+    lines.push('> 🟢 = מקור אמין (70+), 🟡 = בינוני (40-69), 🔴 = נמוך (20-39) — השתמש בזהירות');
     lines.push('');
   }
 

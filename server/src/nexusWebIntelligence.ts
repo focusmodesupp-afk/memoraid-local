@@ -72,10 +72,11 @@ export async function fetchGitHubSources(query: string): Promise<WebSource[]> {
     if (!Array.isArray(data.items)) return [];
 
     const sources: WebSource[] = [];
-    for (const item of data.items.slice(0, 5)) {
+    for (const item of data.items.slice(0, 10)) {
       const repo = item as Record<string, unknown>;
       const fullName = String(repo.full_name ?? '');
       const stars = Number(repo.stargazers_count ?? 0);
+      if (stars < 5) continue; // Skip repos with minimal traction
 
       let contributors: number | undefined;
       try {
@@ -129,13 +130,24 @@ export async function fetchRedditSources(query: string, subreddit?: string): Pro
     const posts = data?.data?.children;
     if (!Array.isArray(posts)) return [];
 
-    return posts.slice(0, 5).map((child) => {
+    const results: WebSource[] = [];
+    for (const child of posts.slice(0, 8)) {
       const post = (child as Record<string, unknown>).data as Record<string, unknown>;
       const score = Number(post.score ?? 0);
       const upvoteRatio = Number(post.upvote_ratio ?? 0);
       const redditScore = Math.round(score * upvoteRatio);
       const trustScore = computeTrustScore({ redditScore });
-      return {
+
+      // Quality gate: skip posts with very low engagement
+      if (trustScore < 15 || score < 3) continue;
+
+      // Relevance check: at least 2 query terms must appear in title+text
+      const queryTerms = (query ?? '').toLowerCase().split(/\s+/).filter(t => t.length > 3);
+      const postText = `${String(post.title ?? '')} ${String(post.selftext ?? '')}`.toLowerCase();
+      const matchCount = queryTerms.filter(t => postText.includes(t)).length;
+      if (queryTerms.length > 0 && matchCount < Math.min(2, queryTerms.length)) continue;
+
+      results.push({
         sourceType: 'reddit' as const,
         url: `https://reddit.com${String(post.permalink ?? '')}`,
         title: String(post.title ?? '').slice(0, 200),
@@ -143,8 +155,10 @@ export async function fetchRedditSources(query: string, subreddit?: string): Pro
         trustScore,
         redditScore,
         rawPayload: post,
-      };
-    });
+      });
+      if (results.length >= 5) break;
+    }
+    return results;
   } catch {
     return [];
   }
