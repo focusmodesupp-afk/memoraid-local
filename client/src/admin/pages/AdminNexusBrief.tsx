@@ -972,8 +972,10 @@ export default function AdminNexusBrief() {
     );
   }
 
-  const isResearching = brief.status === 'researching' || streaming;
-  const isReview = ['review', 'approved', 'rejected', 'in_progress', 'done'].includes(brief.status);
+  const isMeetingMode = (brief as any).researchMode === 'meeting';
+  const isResearching = (brief.status === 'researching' || streaming) && !isMeetingMode;
+  const isReview = ['review', 'approved', 'rejected', 'in_progress', 'done'].includes(brief.status)
+    || (isMeetingMode && brief.status === 'researching');
 
   // Client-side navigation: allow toggling between wizard and results when in review
   const showWizard = (brief.status === 'draft' && !streaming)
@@ -1727,7 +1729,7 @@ export default function AdminNexusBrief() {
       {/* ════════════════════════════════════════════════════════
           MEETING MODE (V2)
           ════════════════════════════════════════════════════════ */}
-      {(brief as any).researchMode === 'meeting' && brief.status !== 'draft' && (
+      {isMeetingMode && brief.status !== 'draft' && (
         <AdminNexusMeetingMode
           briefId={briefId ?? ''}
           brief={{
