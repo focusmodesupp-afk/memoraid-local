@@ -8,6 +8,13 @@
       "when": 1771425791900,
       "tag": "0000_friendly_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1775642238258,
+      "tag": "0001_lowly_slayback",
+      "breakpoints": true
     }
   ]
 }

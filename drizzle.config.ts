@@ -8,7 +8,12 @@ try {
   const env = readFileSync(envPath, 'utf8');
   for (const line of env.split('\n')) {
     const match = line.match(/^([^#=]+)=(.*)$/);
-    if (match) process.env[match[1].trim()] = match[2].trim();
+    if (match) {
+      const key = match[1].trim();
+      if (process.env[key] === undefined) {
+        process.env[key] = match[2].trim();
+      }
+    }
   }
 } catch {
   // .env optional

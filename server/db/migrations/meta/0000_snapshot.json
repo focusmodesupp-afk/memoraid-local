@@ -1,10 +1,8 @@
 {
-  "id": "8cb96322-0c6f-46b3-bff0-924b32ba78be",
-  "prevId": "00000000-0000-0000-0000-000000000000",
-  "version": "5",
-  "dialect": "pg",
+  "version": "6",
+  "dialect": "postgresql",
   "tables": {
-    "families": {
+    "public.families": {
       "name": "families",
       "schema": "",
       "columns": {
@@ -74,14 +72,14 @@
       "uniqueConstraints": {
         "families_invite_code_unique": {
           "name": "families_invite_code_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "invite_code"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       }
     },
-    "patients": {
+    "public.patients": {
       "name": "patients",
       "schema": "",
       "columns": {
@@ -202,21 +200,21 @@
         "patients_family_id_families_id_fk": {
           "name": "patients_family_id_families_id_fk",
           "tableFrom": "patients",
-          "tableTo": "families",
           "columnsFrom": [
             "family_id"
           ],
+          "tableTo": "families",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "sessions": {
+    "public.sessions": {
       "name": "sessions",
       "schema": "",
       "columns": {
@@ -251,21 +249,21 @@
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
-          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
+          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "tasks": {
+    "public.tasks": {
       "name": "tasks",
       "schema": "",
       "columns": {
@@ -396,73 +394,73 @@
         "tasks_family_id_families_id_fk": {
           "name": "tasks_family_id_families_id_fk",
           "tableFrom": "tasks",
-          "tableTo": "families",
           "columnsFrom": [
             "family_id"
           ],
+          "tableTo": "families",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "tasks_patient_id_patients_id_fk": {
           "name": "tasks_patient_id_patients_id_fk",
           "tableFrom": "tasks",
-          "tableTo": "patients",
           "columnsFrom": [
             "patient_id"
           ],
+          "tableTo": "patients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "tasks_created_by_user_id_users_id_fk": {
           "name": "tasks_created_by_user_id_users_id_fk",
           "tableFrom": "tasks",
-          "tableTo": "users",
           "columnsFrom": [
             "created_by_user_id"
           ],
+          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "tasks_assigned_to_user_id_users_id_fk": {
           "name": "tasks_assigned_to_user_id_users_id_fk",
           "tableFrom": "tasks",
-          "tableTo": "users",
           "columnsFrom": [
             "assigned_to_user_id"
           ],
+          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "tasks_completed_by_user_id_users_id_fk": {
           "name": "tasks_completed_by_user_id_users_id_fk",
           "tableFrom": "tasks",
-          "tableTo": "users",
           "columnsFrom": [
             "completed_by_user_id"
           ],
+          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "users": {
+    "public.users": {
       "name": "users",
       "schema": "",
       "columns": {
@@ -556,85 +554,92 @@
         "users_family_id_families_id_fk": {
           "name": "users_family_id_families_id_fk",
           "tableFrom": "users",
-          "tableTo": "families",
           "columnsFrom": [
             "family_id"
           ],
+          "tableTo": "families",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       }
     }
   },
   "enums": {
-    "task_category": {
+    "public.task_category": {
       "name": "task_category",
-      "values": {
-        "medical": "medical",
-        "personal": "personal",
-        "administrative": "administrative",
-        "shopping": "shopping",
-        "transport": "transport",
-        "other": "other"
-      }
+      "schema": "public",
+      "values": [
+        "medical",
+        "personal",
+        "administrative",
+        "shopping",
+        "transport",
+        "other"
+      ]
     },
-    "task_priority": {
+    "public.task_priority": {
       "name": "task_priority",
-      "values": {
-        "urgent": "urgent",
-        "high": "high",
-        "medium": "medium",
-        "low": "low"
-      }
+      "schema": "public",
+      "values": [
+        "urgent",
+        "high",
+        "medium",
+        "low"
+      ]
     },
-    "task_source": {
+    "public.task_source": {
       "name": "task_source",
-      "values": {
-        "manual": "manual",
-        "ai": "ai",
-        "questionnaire": "questionnaire",
-        "appointment": "appointment"
-      }
+      "schema": "public",
+      "values": [
+        "manual",
+        "ai",
+        "questionnaire",
+        "appointment"
+      ]
     },
-    "task_status": {
+    "public.task_status": {
       "name": "task_status",
-      "values": {
-        "scheduled": "scheduled",
-        "todo": "todo",
-        "in_progress": "in_progress",
-        "stuck": "stuck",
-        "postponed": "postponed",
-        "cancelled": "cancelled",
-        "done": "done"
-      }
+      "schema": "public",
+      "values": [
+        "scheduled",
+        "todo",
+        "in_progress",
+        "stuck",
+        "postponed",
+        "cancelled",
+        "done"
+      ]
     },
-    "user_role": {
+    "public.user_role": {
       "name": "user_role",
-      "values": {
-        "manager": "manager",
-        "caregiver": "caregiver",
-        "viewer": "viewer",
-        "guest": "guest"
-      }
+      "schema": "public",
+      "values": [
+        "manager",
+        "caregiver",
+        "viewer",
+        "guest"
+      ]
     }
   },
   "schemas": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
-  }
+    "tables": {},
+    "columns": {}
+  },
+  "id": "8cb96322-0c6f-46b3-bff0-924b32ba78be",
+  "prevId": "00000000-0000-0000-0000-000000000000"
 }

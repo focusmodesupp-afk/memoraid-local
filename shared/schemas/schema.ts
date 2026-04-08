@@ -13,7 +13,7 @@ import {
   decimal,
   index,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Enums (בהתאם ל‑PRD)
@@ -914,7 +914,7 @@ export const adminAiAnalyses = pgTable('admin_ai_analyses', {
   tokensUsed: integer('tokens_used').default(0),
   costUsd: varchar('cost_usd', { length: 24 }).default('0'),
   adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
-  attachedFileIds: uuid('attached_file_ids').array().default([]),
+  attachedFileIds: uuid('attached_file_ids').array().default(sql`'{}'::uuid[]`),
   adminFullName: varchar('admin_full_name', { length: 255 }),
   analysisMetadata: jsonb('analysis_metadata').$type<Record<string, unknown>>().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1298,6 +1298,8 @@ export const sprints = pgTable('sprints', {
   riskLevel: varchar('risk_level', { length: 32 }),
   sprintOrder: integer('sprint_order').notNull().default(0),
   briefId: uuid('brief_id'),
+  retrospectiveNotes: text('retrospective_notes'),
+  retrospectiveCompletedAt: timestamp('retrospective_completed_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => adminUsers.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1449,6 +1451,61 @@ export const pipelineAlerts = pgTable('pipeline_alerts', {
 // Nexus – Virtual Software House Brain
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── Nexus Research OS Enums ─────────────────────────────────────────────────
+
+export const nexusRequestTypeEnum = pgEnum('nexus_request_type', [
+  'feature',
+  'bug',
+  'redesign',
+  'ai_issue',
+  'feasibility',
+  'integration',
+  'security',
+  'performance',
+  'documentation',
+]);
+
+export const nexusPriorityLevelEnum = pgEnum('nexus_priority_level', [
+  'critical',
+  'high',
+  'medium',
+  'low',
+]);
+
+export const nexusBusinessGoalEnum = pgEnum('nexus_business_goal', [
+  'improve_ux',
+  'performance',
+  'sprints',
+  'research_quality',
+  'reduce_duplication',
+  'mvp',
+  'revenue',
+  'compliance',
+  'scalability',
+]);
+
+export const nexusBriefStateEnum = pgEnum('nexus_brief_state', [
+  'draft',
+  'intake',
+  'setup',
+  'researching_round_1',
+  'awaiting_round_1_review',
+  'decision_review_round_1',
+  'researching_round_2',
+  'decision_review_round_2',
+  'researching_round_3',
+  'awaiting_round_3_review',
+  'decision_review_round_3',
+  'researching_round_4',
+  'decision_review_round_4',
+  'blocked_validation',
+  'awaiting_sprint_approval',
+  'approved_for_sprint',
+  'awaiting_prompt_review',
+  'exported',
+  'failed',
+]);
+
 export const nexusBriefStatusEnum = pgEnum('nexus_brief_status', [
   'draft',
   'researching',
@@ -1488,6 +1545,18 @@ export const nexusBriefs = pgTable('nexus_briefs', {
   round1Synthesis: text('round_1_synthesis'),
   round2Synthesis: text('round_2_synthesis'),
   round3Synthesis: text('round_3_synthesis'),
+  round4Synthesis: text('round_4_synthesis'),
+  // ── Research OS fields (Wave 1A) ──
+  intakeId: uuid('intake_id'),
+  requestType: varchar('request_type', { length: 32 }),
+  businessGoal: varchar('business_goal', { length: 32 }),
+  briefPriority: varchar('brief_priority', { length: 16 }),
+  affectedSystems: text('affected_systems').array().notNull().default([]),
+  constraints: text('constraints').array().notNull().default([]),
+  targetAudience: text('target_audience').array().notNull().default([]),
+  riskDescription: text('risk_description'),
+  setupSource: varchar('setup_source', { length: 16 }).default('manual'),
+  briefState: nexusBriefStateEnum('brief_state').default('draft'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -1546,10 +1615,19 @@ export const nexusBriefRounds = pgTable('nexus_brief_rounds', {
   synthesisModel: varchar('synthesis_model', { length: 64 }),
   synthesisTokens: integer('synthesis_tokens').default(0),
   synthesisCostUsd: varchar('synthesis_cost_usd', { length: 16 }).default('0'),
+  synthesisStatus: varchar('synthesis_status', { length: 16 }).default('pending'),
+  adminEditedSynthesis: text('admin_edited_synthesis'),
+  reviewNotes: text('review_notes'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  approvedBy: uuid('approved_by'),
   participantCount: integer('participant_count').default(0),
   completedCount: integer('completed_count').default(0),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
+  // Decision Intelligence fields
+  decisionReviewId: uuid('decision_review_id'),
+  approvedFindingsJson: jsonb('approved_findings_json'),
+  filteredSynthesis: text('filtered_synthesis'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -1610,12 +1688,12 @@ export const nexusIdeas = pgTable('nexus_ideas', {
   estimatedHours: integer('estimated_hours'),
   estimatedCost: varchar('estimated_cost', { length: 16 }),
   affectedEnvironment: varchar('affected_environment', { length: 16 }),
-  affectedFiles: text('affected_files').array().default([]),
-  tags: text('tags').array().default([]),
+  affectedFiles: text('affected_files').array().default(sql`'{}'::text[]`),
+  tags: text('tags').array().default(sql`'{}'::text[]`),
 
   sprintId: uuid('sprint_id'),
   briefIdCreatedFrom: uuid('brief_id_created_from'),
-  relatedIdeaIds: uuid('related_idea_ids').array().default([]),
+  relatedIdeaIds: uuid('related_idea_ids').array().default(sql`'{}'::uuid[]`),
 
   createdBy: uuid('created_by').references(() => adminUsers.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1726,6 +1804,10 @@ export const nexusBriefQuestions = pgTable('nexus_brief_questions', {
   confidence: integer('confidence').notNull().default(0),
   verified: boolean('verified').notNull().default(false),
   position: integer('position').notNull().default(0),
+  processingStatus: varchar('processing_status', { length: 16 }).default('pending'),  // pending | answered | failed
+  failedReason: varchar('failed_reason', { length: 32 }),                              // parse_error | timeout | ai_error
+  retryCount: integer('retry_count').notNull().default(0),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -1742,6 +1824,49 @@ export const nexusQuestionTemplates = pgTable('nexus_question_templates', {
   position: integer('position').notNull().default(0),
 });
 
+// ── Nexus Department Team Members ────────────────────────────────────────────
+export const nexusDeptTeamMembers = pgTable('nexus_dept_team_members', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  department: text('department').notNull(),
+  name: text('name').notNull(),
+  roleEn: text('role_en').notNull(),
+  roleHe: text('role_he').notNull(),
+  emoji: text('emoji').notNull().default('👤'),
+  level: text('level').notNull().default('member'),
+  responsibilities: text('responsibilities'),
+  skills: text('skills').array(),
+  defaultModel: text('default_model'),
+  systemPromptOverride: text('system_prompt_override'),
+  isActive: boolean('is_active').notNull().default(true),
+  orderIndex: integer('order_index').notNull().default(0),
+  bio: text('bio'),
+  experienceYears: integer('experience_years'),
+  education: text('education'),
+  certifications: text('certifications').array(),
+  domainExpertise: text('domain_expertise').array(),
+  languages: text('languages').array(),
+  methodology: text('methodology'),
+  personality: text('personality'),
+  achievements: text('achievements'),
+  background: text('background'),
+  workHistory: jsonb('work_history').$type<Array<Record<string, unknown>>>().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Nexus Web Feeds ─────────────────────────────────────────────────────────
+export const nexusWebFeeds = pgTable('nexus_web_feeds', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sourceType: text('source_type').notNull(),
+  url: text('url').notNull().unique(),
+  label: text('label').notNull(),
+  category: text('category').notNull().default('tech'),
+  departments: text('departments').array(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ── Nexus Department Knowledge Base ──────────────────────────────────────────
 export const nexusDeptKnowledge = pgTable('nexus_dept_knowledge', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -1753,4 +1878,171 @@ export const nexusDeptKnowledge = pgTable('nexus_dept_knowledge', {
   position: integer('position').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Nexus Research OS – Wave 1A Tables
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── RBAC Roles ──────────────────────────────────────────────────────────────
+export const nexusAdminRoles = pgTable('nexus_admin_roles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  adminUserId: uuid('admin_user_id')
+    .notNull()
+    .references(() => adminUsers.id, { onDelete: 'cascade' }),
+  role: varchar('role', { length: 32 }).notNull(),
+  grantedBy: uuid('granted_by').references(() => adminUsers.id, { onDelete: 'set null' }),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Discovery Intake Submissions ────────────────────────────────────────────
+export const nexusIntakeSubmissions = pgTable('nexus_intake_submissions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  requestType: nexusRequestTypeEnum('request_type').notNull(),
+  businessGoal: nexusBusinessGoalEnum('business_goal').notNull(),
+  affectedSystems: text('affected_systems').array().notNull().default([]),
+  priority: nexusPriorityLevelEnum('priority').notNull().default('medium'),
+  constraints: text('constraints').array().notNull().default([]),
+  targetAudience: text('target_audience').array().notNull().default([]),
+  riskDescription: text('risk_description'),
+  dynamicAnswers: jsonb('dynamic_answers').notNull().default({}),
+  freeTextDescription: text('free_text_description'),
+  briefId: uuid('brief_id').references(() => nexusBriefs.id, { onDelete: 'set null' }),
+  aiRecommendation: jsonb('ai_recommendation'),
+  aiRecommendationAccepted: boolean('ai_recommendation_accepted').notNull().default(false),
+  wizardStep: integer('wizard_step').notNull().default(1),
+  wizardCompleted: boolean('wizard_completed').notNull().default(false),
+  wizardAbandonedAt: timestamp('wizard_abandoned_at', { withTimezone: true }),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Analytics Events ────────────────────────────────────────────────────────
+export const nexusAnalyticsEvents = pgTable('nexus_analytics_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  eventType: varchar('event_type', { length: 64 }).notNull(),
+  briefId: uuid('brief_id').references(() => nexusBriefs.id, { onDelete: 'set null' }),
+  intakeId: uuid('intake_id').references(() => nexusIntakeSubmissions.id, { onDelete: 'set null' }),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  payload: jsonb('payload').notNull().default({}),
+  requestType: varchar('request_type', { length: 32 }),
+  departmentContext: varchar('department_context', { length: 32 }),
+  roundNumber: integer('round_number'),
+  durationMs: integer('duration_ms'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Nexus Decision Intelligence — Governance & Workflow Orchestration
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── Decision Reviews (one per round gate) ───────────────────────────────────
+export const nexusDecisionReviews = pgTable('nexus_decision_reviews', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id')
+    .notNull()
+    .references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  roundId: uuid('round_id')
+    .notNull()
+    .references(() => nexusBriefRounds.id, { onDelete: 'cascade' }),
+  roundNumber: integer('round_number').notNull(),
+  gateType: varchar('gate_type', { length: 32 }).notNull().default('progression_decision'),
+  status: varchar('status', { length: 16 }).notNull().default('pending'),
+  overallDecision: varchar('overall_decision', { length: 32 }),
+  workflowAction: varchar('workflow_action', { length: 32 }),
+  decisionSummary: text('decision_summary'),
+  approvedCount: integer('approved_count').default(0),
+  rejectedCount: integer('rejected_count').default(0),
+  deferredCount: integer('deferred_count').default(0),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Decision Items (per-finding decisions) ──────────────────────────────────
+export const nexusDecisionItems = pgTable('nexus_decision_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reviewId: uuid('review_id')
+    .notNull()
+    .references(() => nexusDecisionReviews.id, { onDelete: 'cascade' }),
+  briefId: uuid('brief_id')
+    .notNull()
+    .references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  parentItemId: uuid('parent_item_id'),
+  itemIndex: integer('item_index').notNull().default(0),
+  itemTitle: varchar('item_title', { length: 500 }).notNull(),
+  itemSummary: text('item_summary'),
+  sourceDepartment: varchar('source_department', { length: 32 }),
+  sourceEmployee: varchar('source_employee', { length: 255 }),
+  decision: varchar('decision', { length: 32 }),
+  reason: text('reason'),
+  reasonCategory: varchar('reason_category', { length: 32 }),
+  routedTo: varchar('routed_to', { length: 32 }),
+  revisionSpec: jsonb('revision_spec'),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Decision History (audit trail) ──────────────────────────────────────────
+export const nexusDecisionHistory = pgTable('nexus_decision_history', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reviewId: uuid('review_id').references(() => nexusDecisionReviews.id, { onDelete: 'cascade' }),
+  itemId: uuid('item_id').references(() => nexusDecisionItems.id, { onDelete: 'cascade' }),
+  action: varchar('action', { length: 32 }).notNull(),
+  fromDecision: varchar('from_decision', { length: 32 }),
+  toDecision: varchar('to_decision', { length: 32 }),
+  reason: text('reason'),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Round Snapshots (versioned frozen state) ────────────────────────────────
+export const nexusRoundSnapshots = pgTable('nexus_round_snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id')
+    .notNull()
+    .references(() => nexusBriefs.id, { onDelete: 'cascade' }),
+  roundId: uuid('round_id')
+    .notNull()
+    .references(() => nexusBriefRounds.id, { onDelete: 'cascade' }),
+  roundNumber: integer('round_number').notNull(),
+  snapshotType: varchar('snapshot_type', { length: 32 }).notNull(),
+  content: text('content'),
+  metadata: jsonb('metadata').notNull().default({}),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Future Backlog (deferred items) ─────────────────────────────────────────
+export const nexusFutureBacklog = pgTable('nexus_future_backlog', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id').references(() => nexusBriefs.id, { onDelete: 'set null' }),
+  decisionItemId: uuid('decision_item_id').references(() => nexusDecisionItems.id, { onDelete: 'set null' }),
+  title: varchar('title', { length: 500 }).notNull(),
+  description: text('description'),
+  sourceRound: integer('source_round'),
+  sourceDepartment: varchar('source_department', { length: 32 }),
+  priority: varchar('priority', { length: 16 }),
+  reEvaluateDate: timestamp('re_evaluate_date', { withTimezone: true }),
+  status: varchar('status', { length: 16 }).notNull().default('parked'),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Cancelled Archive (rejected items) ──────────────────────────────────────
+export const nexusCancelledArchive = pgTable('nexus_cancelled_archive', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  briefId: uuid('brief_id').references(() => nexusBriefs.id, { onDelete: 'set null' }),
+  decisionItemId: uuid('decision_item_id').references(() => nexusDecisionItems.id, { onDelete: 'set null' }),
+  title: varchar('title', { length: 500 }).notNull(),
+  description: text('description'),
+  cancelReason: text('cancel_reason'),
+  sourceRound: integer('source_round'),
+  sourceDepartment: varchar('source_department', { length: 32 }),
+  canReopen: boolean('can_reopen').notNull().default(true),
+  status: varchar('status', { length: 16 }).notNull().default('cancelled'),
+  adminUserId: uuid('admin_user_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
